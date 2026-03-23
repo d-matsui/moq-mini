@@ -40,10 +40,11 @@ use anyhow::Result;
 
 use quinn::Endpoint;
 use tokio::sync::Mutex;
+use tracing::{debug, error, info, warn};
 
 use moqt_core::session::subgroup::SubgroupReader;
 use moqt_core::session::subscribe_request::SubscribeRequest;
-use moqt_core::session::{MoqtSession, SessionEvent};
+use moqt_core::session::{MoqtSession, RequestError, SessionEvent};
 use moqt_core::wire::parameter::{MessageParameter, SubscriptionFilter};
 use moqt_core::wire::request_error::{ERROR_DOES_NOT_EXIST, ERROR_NOT_SUPPORTED};
 use moqt_core::wire::subscribe_ok::SubscribeOkMessage;
@@ -220,7 +221,7 @@ impl Relay {
             let state = self.state.clone();
             tokio::spawn(async move {
                 if let Err(e) = handle_connection(incoming, state).await {
-                    eprintln!("connection error: {e}");
+                    error!(error = %e, "connection error");
                 }
             });
         }
@@ -260,6 +261,7 @@ async fn handle_connection(incoming: quinn::Incoming, state: Arc<Mutex<RelayStat
     let session = Arc::new(MoqtSession::accept(wt_session).await?);
 
     let session_id = state.lock().await.register_session(session.clone());
+    info!(session_id, "session established");
 
     // === Main loop: handle events until the connection closes ===
     loop {
@@ -273,25 +275,27 @@ async fn handle_connection(incoming: quinn::Incoming, state: Arc<Mutex<RelayStat
             SessionEvent::Subscribe(request) => {
                 tokio::spawn(async move {
                     if let Err(e) = handle_subscribe(session_id, request, state).await {
-                        eprintln!("subscribe error: {e}");
+                        error!(session_id, error = %e, "subscribe error");
                     }
                 });
             }
             SessionEvent::PublishNamespace(mut request) => {
+                let ns = request.message.track_namespace.clone();
                 tokio::spawn(async move {
                     state
                         .lock()
                         .await
-                        .register_namespace(request.message.track_namespace.clone(), session_id);
+                        .register_namespace(ns.clone(), session_id);
+                    info!(session_id, namespace = ?ns, "namespace registered");
                     if let Err(e) = request.accept().await {
-                        eprintln!("publish_namespace error: {e}");
+                        error!(session_id, error = %e, "publish_namespace error");
                     }
                 });
             }
             SessionEvent::DataStream(subgroup_reader) => {
                 tokio::spawn(async move {
                     if let Err(e) = handle_data_stream(session_id, subgroup_reader, state).await {
-                        eprintln!("data stream error: {e}");
+                        error!(session_id, error = %e, "data stream error");
                     }
                 });
             }
@@ -299,6 +303,7 @@ async fn handle_connection(incoming: quinn::Incoming, state: Arc<Mutex<RelayStat
     }
 
     // === Cleanup on disconnect ===
+    debug!(session_id, "session disconnected");
     state.lock().await.remove_session(session_id);
 
     Ok(())
@@ -339,7 +344,7 @@ async fn handle_data_stream(
     for session in &sub_sessions {
         match session.open_data_stream(subgroup_reader.header()).await {
             Ok(w) => writers.push(Arc::new(Mutex::new(w))),
-            Err(e) => eprintln!("failed to open data stream to subscriber: {e}"),
+            Err(e) => warn!(error = %e, "failed to open data stream to subscriber"),
         }
     }
     let mut active_writers = writers;
@@ -356,7 +361,7 @@ async fn handle_data_stream(
                 drop(w);
                 still_active.push(writer);
             } else {
-                eprintln!("subscriber write error, removing from relay");
+                warn!("subscriber write error, removing from relay");
             }
         }
         active_writers = still_active;
@@ -368,7 +373,7 @@ async fn handle_data_stream(
     for writer in &active_writers {
         let mut w = writer.lock().await;
         if let Err(e) = w.finish() {
-            eprintln!("subscriber finish error: {e}");
+            warn!(error = %e, "subscriber finish error");
         }
     }
 
@@ -468,13 +473,35 @@ async fn handle_subscribe(
         };
 
     // === Forward SUBSCRIBE to publisher via session API ===
-    let mut subscription = publisher_session
+    let mut subscription = match publisher_session
         .subscribe(
             msg.track_namespace.clone(),
             track_name_str,
             msg.parameters.clone(),
         )
-        .await?;
+        .await
+    {
+        Ok(sub) => sub,
+        Err(e) => {
+            if let Some(RequestError::Rejected {
+                status_code,
+                reason,
+            }) = e.downcast_ref()
+            {
+                warn!(
+                    subscriber_session,
+                    status_code, reason, "publisher rejected SUBSCRIBE, forwarding to subscriber"
+                );
+                subscriber_request
+                    .lock()
+                    .await
+                    .reject(*status_code, reason)
+                    .await?;
+                return Ok(());
+            }
+            return Err(e);
+        }
+    };
 
     let track_alias = subscription.track_alias();
 

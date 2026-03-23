@@ -38,7 +38,7 @@ async fn start_relay() -> (
     rustls_pki_types::CertificateDer<'static>,
 ) {
     let (cert_der, key_der) = gen_cert();
-    let server_config = quic_config::make_server_config(cert_der.clone(), key_der);
+    let server_config = quic_config::make_server_config(cert_der.clone(), key_der).unwrap();
     let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let endpoint = quinn::Endpoint::server(server_config, addr).unwrap();
     let local_addr = endpoint.local_addr().unwrap();

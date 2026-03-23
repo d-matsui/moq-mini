@@ -21,9 +21,17 @@ use moqt_core::client::{self, TlsConfig};
 use moqt_core::session::SessionEvent;
 use moqt_core::wire::parameter::{MessageParameter, SubscriptionFilter};
 use moqt_core::wire::track_namespace::TrackNamespace;
+use tracing::{debug, info};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install crypto provider");
@@ -49,13 +57,9 @@ async fn main() -> anyhow::Result<()> {
         .map(|s| s.as_str())
         .unwrap_or("video");
 
-    if !pipe_mode {
-        eprintln!("Connecting to relay at {relay_addr}...");
-    }
+    info!(addr = %relay_addr, "connecting to relay");
     let session = client::connect(relay_addr, "localhost", TlsConfig::Insecure).await?;
-    if !pipe_mode {
-        eprintln!("Connected. SETUP exchange complete.");
-    }
+    info!("connected, SETUP exchange complete");
 
     // SUBSCRIBE
     let ns = TrackNamespace::from(&[namespace] as &[&str]);
@@ -68,12 +72,7 @@ async fn main() -> anyhow::Result<()> {
             )],
         )
         .await?;
-    if !pipe_mode {
-        eprintln!(
-            "Received SUBSCRIBE_OK (alias={}).",
-            subscription.track_alias()
-        );
-    }
+    info!(alias = subscription.track_alias(), "received SUBSCRIBE_OK");
 
     // Wrap session in Arc so it can be shared with the receive task
     let session = std::sync::Arc::new(session);
@@ -121,14 +120,17 @@ async fn main() -> anyhow::Result<()> {
                 }
             } else {
                 // Demo mode: print human-readable
-                eprintln!(
-                    "  Group {} (alias={}):",
-                    group.group_id(),
-                    group.track_alias()
-                );
+                let group_id = group.group_id();
+                let alias = group.track_alias();
+                debug!(group_id, alias, "receiving group");
                 let mut object_id: u64 = 0;
                 while let Ok(Some(payload)) = group.read_object().await {
-                    eprintln!("    Object {object_id}: {} bytes", payload.len());
+                    debug!(
+                        group_id,
+                        object_id,
+                        bytes = payload.len(),
+                        "received object"
+                    );
                     object_id += 1;
                 }
             }
@@ -137,19 +139,16 @@ async fn main() -> anyhow::Result<()> {
 
     // Wait for PUBLISH_DONE
     let publish_done = subscription.recv_publish_done().await?;
-    if !pipe_mode {
-        eprintln!(
-            "Received PUBLISH_DONE (status={}, streams={}).",
-            publish_done.status_code, publish_done.stream_count
-        );
-    }
+    info!(
+        status = publish_done.status_code,
+        streams = publish_done.stream_count,
+        "received PUBLISH_DONE"
+    );
 
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     session.close();
     let _ = receive_handle.await;
 
-    if !pipe_mode {
-        eprintln!("Done.");
-    }
+    info!("done");
     Ok(())
 }

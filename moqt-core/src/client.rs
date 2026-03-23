@@ -26,8 +26,8 @@ pub enum TlsConfig {
 /// and performs the SETUP exchange.
 pub async fn connect(addr: SocketAddr, server_name: &str, tls: TlsConfig) -> Result<MoqtSession> {
     let client_config = match tls {
-        TlsConfig::TrustCert(cert_der) => quic_config::make_client_config(cert_der),
-        TlsConfig::Insecure => make_insecure_client_config(),
+        TlsConfig::TrustCert(cert_der) => quic_config::make_client_config(cert_der)?,
+        TlsConfig::Insecure => make_insecure_client_config()?,
     };
 
     let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
@@ -45,7 +45,8 @@ pub async fn connect(addr: SocketAddr, server_name: &str, tls: TlsConfig) -> Res
 
 /// Create a QUIC client config that skips certificate verification.
 /// For development only.
-fn make_insecure_client_config() -> quinn::ClientConfig {
+fn make_insecure_client_config() -> Result<quinn::ClientConfig> {
+    use anyhow::Context;
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 
     #[derive(Debug)]
@@ -91,6 +92,7 @@ fn make_insecure_client_config() -> quinn::ClientConfig {
         .with_no_client_auth();
     client_crypto.alpn_protocols = vec![quic_config::ALPN_MOQT.to_vec()];
 
-    let quic_config = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto).unwrap();
-    quinn::ClientConfig::new(Arc::new(quic_config))
+    let quic_config = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
+        .context("failed to create insecure QUIC client config")?;
+    Ok(quinn::ClientConfig::new(Arc::new(quic_config)))
 }

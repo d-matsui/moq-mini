@@ -6,6 +6,8 @@ edition.workspace = true
 [dependencies]
 moqt-core = { path = "../moqt-core" }
 anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 quinn.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true

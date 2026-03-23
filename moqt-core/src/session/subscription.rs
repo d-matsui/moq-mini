@@ -3,8 +3,9 @@
 //! Represents a subscription after SUBSCRIBE_OK has been received.
 //! Holds the bidi stream's recv side to receive PUBLISH_DONE later.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
+use crate::session::RequestError;
 use crate::stream::request::{RequestMessage, RequestStreamReader};
 use crate::wire::publish_done::PublishDoneMessage;
 use crate::wire::subscribe_ok::SubscribeOkMessage;
@@ -35,7 +36,10 @@ impl Subscription {
         let msg = self.reader.read_message().await?;
         match msg {
             RequestMessage::PublishDone(done) => Ok(done),
-            _ => bail!("expected PUBLISH_DONE"),
+            _ => Err(RequestError::UnexpectedMessage {
+                expected: "PUBLISH_DONE",
+            }
+            .into()),
         }
     }
 }

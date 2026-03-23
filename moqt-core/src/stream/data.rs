@@ -11,7 +11,7 @@
 use anyhow::Result;
 use web_transport_quinn::{RecvStream, SendStream};
 
-use crate::stream::read_varint;
+use crate::stream::{read_varint, try_read_varint};
 use crate::wire::object::ObjectHeader;
 use crate::wire::subgroup_header::SubgroupHeader;
 
@@ -76,18 +76,10 @@ impl DataStreamReader {
     pub async fn read_object(&mut self) -> Result<Option<(ObjectHeader, Vec<u8>, Vec<u8>)>> {
         let mut header_bytes = Vec::new();
 
-        // Read object_id_delta; EOF means end of stream
-        let (object_id_delta, delta_bytes) = match read_varint(&mut self.stream).await {
-            Ok(v) => v,
-            Err(e) => {
-                // ReadExactError::FinishedEarly indicates stream FIN
-                if e.downcast_ref::<web_transport_quinn::ReadExactError>()
-                    .is_some()
-                {
-                    return Ok(None);
-                }
-                return Err(e);
-            }
+        // Read object_id_delta; stream FIN means no more objects
+        let (object_id_delta, delta_bytes) = match try_read_varint(&mut self.stream).await? {
+            Some(v) => v,
+            None => return Ok(None),
         };
         header_bytes.extend_from_slice(&delta_bytes);
 

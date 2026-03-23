@@ -31,9 +31,17 @@ use moqt_core::client::{self, TlsConfig};
 use moqt_core::session::subgroup::SubgroupWriter;
 use moqt_core::session::{MoqtSession, SessionEvent};
 use moqt_core::wire::track_namespace::TrackNamespace;
+use tracing::{debug, info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install crypto provider");
@@ -60,29 +68,29 @@ async fn main() -> anyhow::Result<()> {
         .map(|s| s.as_str())
         .unwrap_or("video");
 
-    eprintln!("Connecting to relay at {relay_addr}...");
+    info!(addr = %relay_addr, "connecting to relay");
     let session = client::connect(relay_addr, "localhost", TlsConfig::Insecure).await?;
-    eprintln!("Connected. SETUP exchange complete.");
+    info!("connected, SETUP exchange complete");
 
     // === PUBLISH_NAMESPACE ===
     let ns = TrackNamespace::from(&[namespace] as &[&str]);
     session.publish_namespace(ns.clone()).await?;
-    eprintln!("PUBLISH_NAMESPACE registered.");
+    info!("PUBLISH_NAMESPACE registered");
 
     // === Wait for SUBSCRIBE ===
-    eprintln!("Waiting for SUBSCRIBE...");
+    debug!("waiting for SUBSCRIBE");
     let mut request = match session.next_event().await? {
         SessionEvent::Subscribe(r) => r,
         _ => anyhow::bail!("expected SUBSCRIBE"),
     };
-    eprintln!(
-        "Received SUBSCRIBE for track: {:?}",
-        String::from_utf8_lossy(&request.message.track_name)
+    info!(
+        track = %String::from_utf8_lossy(&request.message.track_name),
+        "received SUBSCRIBE"
     );
 
     // Send SUBSCRIBE_OK (Track Alias = 1)
     request.accept(1).await?;
-    eprintln!("Sent SUBSCRIBE_OK (alias=1).");
+    info!("sent SUBSCRIBE_OK (alias=1)");
 
     if pipe_mode {
         // === Pipe mode: read IVF video from stdin and publish ===
@@ -92,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
         request.send_publish_done(stream_count).await?;
         // Wait for data to be flushed before closing the connection
         tokio::time::sleep(Duration::from_secs(1)).await;
-        eprintln!("Sent PUBLISH_DONE ({stream_count} streams). Exiting.");
+        info!(stream_count, "sent PUBLISH_DONE, exiting");
     } else {
         // === Demo mode: send dummy data ===
         for group_id in 0u64..5 {
@@ -104,12 +112,12 @@ async fn main() -> anyhow::Result<()> {
             }
 
             group.finish()?;
-            eprintln!("Sent group {group_id} (3 objects)");
+            debug!(group_id, objects = 3, "sent group");
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
 
         request.send_publish_done(5).await?;
-        eprintln!("Sent PUBLISH_DONE. Exiting.");
+        info!("sent PUBLISH_DONE, exiting");
     }
 
     Ok(())
@@ -150,7 +158,7 @@ async fn send_from_stdin(session: &MoqtSession, _track_name: &str) -> anyhow::Re
         // Skip the IVF file header (32 bytes)
         let mut file_header = [0u8; 32];
         if reader.read_exact(&mut file_header).is_err() {
-            eprintln!("failed to read IVF file header");
+            warn!("failed to read IVF file header");
             return;
         }
 
@@ -203,7 +211,7 @@ async fn send_from_stdin(session: &MoqtSession, _track_name: &str) -> anyhow::Re
                 group.finish()?;
             }
             stream_count += 1;
-            eprintln!("Sent group {group_id} ({object_id} objects)");
+            debug!(group_id, objects = object_id, "sent group");
             group_id += 1;
             object_id = 0;
         }
@@ -225,7 +233,7 @@ async fn send_from_stdin(session: &MoqtSession, _track_name: &str) -> anyhow::Re
     if let Some(mut group) = current_group.take() {
         group.finish()?;
         stream_count += 1;
-        eprintln!("Sent group {group_id} ({object_id} objects)");
+        debug!(group_id, objects = object_id, "sent group");
     }
 
     Ok(stream_count)

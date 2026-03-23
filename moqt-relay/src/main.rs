@@ -13,9 +13,17 @@ use moqt_relay::relay;
 use std::net::SocketAddr;
 
 use moqt_core::quic_config;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install crypto provider");
@@ -39,13 +47,12 @@ async fn main() -> anyhow::Result<()> {
     let key_der = rustls_pemfile::private_key(&mut &key_pem[..])?
         .ok_or_else(|| anyhow::anyhow!("no private key found in {key_path}"))?;
 
-    eprintln!("Certificate: {cert_path}");
-    eprintln!("Key: {key_path}");
+    info!(cert = %cert_path, key = %key_path, "loaded TLS credentials");
 
-    let server_config = quic_config::make_server_config(cert_der, key_der);
+    let server_config = quic_config::make_server_config(cert_der, key_der)?;
     let endpoint = quinn::Endpoint::server(server_config, addr)?;
 
-    eprintln!("Relay listening on {addr}");
+    info!(%addr, "relay listening");
     let relay = relay::Relay::new(endpoint);
     relay.run().await?;
 

@@ -43,6 +43,32 @@ pub async fn read_varint(stream: &mut RecvStream) -> Result<(u64, Vec<u8>)> {
     Ok((value, raw))
 }
 
+/// Read a single varint from a stream, returning `None` on stream FIN.
+///
+/// Same as `read_varint`, but distinguishes a clean stream end (FIN)
+/// from a real read error. Only the first byte read is checked for FIN;
+/// a FIN in the middle of a multi-byte varint is still an error.
+pub async fn try_read_varint(stream: &mut RecvStream) -> Result<Option<(u64, Vec<u8>)>> {
+    let mut first = [0u8; 1];
+    match stream.read_exact(&mut first).await {
+        Ok(()) => {}
+        Err(web_transport_quinn::ReadExactError::FinishedEarly { .. }) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    }
+
+    let total_len = varint_byte_length(first[0])?;
+
+    let mut raw = vec![0u8; total_len];
+    raw[0] = first[0];
+    if total_len > 1 {
+        stream.read_exact(&mut raw[1..]).await?;
+    }
+
+    let mut slice = raw.as_slice();
+    let value = decode_varint(&mut slice)?;
+    Ok(Some((value, raw)))
+}
+
 /// Read one message frame (Type + Length + Payload) from a stream.
 /// Returns the concatenated raw bytes.
 ///

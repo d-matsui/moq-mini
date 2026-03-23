@@ -5,6 +5,8 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
 quinn.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true

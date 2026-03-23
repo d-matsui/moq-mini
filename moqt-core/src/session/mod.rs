@@ -18,7 +18,7 @@ pub mod subscription;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::session::publish_namespace_request::PublishNamespaceRequest;
 use crate::session::subgroup::{SubgroupReader, SubgroupWriter};
@@ -33,6 +33,22 @@ use crate::wire::setup::{SetupMessage, SetupOption};
 use crate::wire::subgroup_header::SubgroupHeader;
 use crate::wire::subscribe::SubscribeMessage;
 use crate::wire::track_namespace::TrackNamespace;
+
+// === RequestError ===
+
+/// Error returned when a request (SUBSCRIBE, PUBLISH_NAMESPACE, etc.)
+/// is rejected by the peer via REQUEST_ERROR, or an unexpected message
+/// is received on a request stream.
+#[derive(Debug, thiserror::Error)]
+pub enum RequestError {
+    /// Peer responded with REQUEST_ERROR.
+    #[error("request rejected: code=0x{status_code:X}, reason={reason}")]
+    Rejected { status_code: u64, reason: String },
+
+    /// Received an unexpected message type on the request stream.
+    #[error("unexpected message: expected {expected}")]
+    UnexpectedMessage { expected: &'static str },
+}
 
 // === RequestIdAllocator ===
 
@@ -164,13 +180,15 @@ impl MoqtSession {
         let response = reader.read_message().await?;
         match response {
             RequestMessage::RequestOk(_) => Ok(()),
-            RequestMessage::RequestError(err) => {
-                bail!(
-                    "PUBLISH_NAMESPACE rejected: {}",
-                    String::from_utf8_lossy(&err.reason_phrase.value)
-                )
+            RequestMessage::RequestError(err) => Err(RequestError::Rejected {
+                status_code: err.error_code,
+                reason: String::from_utf8_lossy(&err.reason_phrase.value).into(),
             }
-            _ => bail!("unexpected response to PUBLISH_NAMESPACE"),
+            .into()),
+            _ => Err(RequestError::UnexpectedMessage {
+                expected: "REQUEST_OK or REQUEST_ERROR",
+            }
+            .into()),
         }
     }
 
@@ -199,13 +217,15 @@ impl MoqtSession {
         let response = reader.read_message().await?;
         match response {
             RequestMessage::SubscribeOk(ok) => Ok(Subscription::new(ok, reader)),
-            RequestMessage::RequestError(err) => {
-                bail!(
-                    "SUBSCRIBE rejected: {}",
-                    String::from_utf8_lossy(&err.reason_phrase.value)
-                )
+            RequestMessage::RequestError(err) => Err(RequestError::Rejected {
+                status_code: err.error_code,
+                reason: String::from_utf8_lossy(&err.reason_phrase.value).into(),
             }
-            _ => bail!("unexpected response to SUBSCRIBE"),
+            .into()),
+            _ => Err(RequestError::UnexpectedMessage {
+                expected: "SUBSCRIBE_OK or REQUEST_ERROR",
+            }
+            .into()),
         }
     }
 
@@ -229,7 +249,10 @@ impl MoqtSession {
                             PublishNamespaceRequest::new(pub_ns, writer),
                         ))
                     }
-                    _ => bail!("unexpected message on request stream"),
+                    _ => Err(RequestError::UnexpectedMessage {
+                        expected: "SUBSCRIBE or PUBLISH_NAMESPACE",
+                    }
+                    .into()),
                 }
             }
             uni = self.session.accept_uni() => {
