@@ -104,6 +104,35 @@ mod tests {
         });
     }
 
+    /// Expected wire bytes for: delta=0, payload_length=100
+    ///
+    /// MOQT varint: 1-byte encodes 0..127 (7 usable bits)
+    /// delta=0 → 0x00, payload_length=100 → 0x64
+    const OBJECT_BASIC: &[u8] = &[
+        0x00, // Object ID Delta: 0
+        0x64, // Payload Length: 100 (1-byte varint)
+    ];
+
+    #[test]
+    fn encode_known_bytes() {
+        let header = ObjectHeader {
+            object_id_delta: 0,
+            payload_length: 100,
+        };
+        let mut buf = Vec::new();
+        header.encode(&mut buf);
+        assert_eq!(buf, OBJECT_BASIC);
+    }
+
+    #[test]
+    fn decode_known_bytes() {
+        let mut slice = OBJECT_BASIC.as_ref();
+        let decoded = ObjectHeader::decode(&mut slice, false).unwrap();
+        assert_eq!(decoded.object_id_delta, 0);
+        assert_eq!(decoded.payload_length, 100);
+        assert!(slice.is_empty());
+    }
+
     // Object ID resolution: consecutive IDs (0,1,2,...) with delta=0
     #[test]
     fn resolve_consecutive_ids() {

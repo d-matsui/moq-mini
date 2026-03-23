@@ -134,4 +134,44 @@ mod tests {
         let mut slice = buf.as_slice();
         assert!(PublishNamespaceMessage::decode(&mut slice).is_err());
     }
+
+    /// Expected wire bytes for: request_id=0, delta=0, namespace=["example"], no params
+    ///
+    /// Payload (12 bytes):
+    ///   request_id(1) + delta(1) + ns_count(1) + field_len(1) + "example"(7)
+    ///   + param_count(1) = 12
+    const PUBLISH_NAMESPACE_BASIC: &[u8] = &[
+        0x06, // Type: PUBLISH_NAMESPACE
+        0x00, 0x0C, // Length: 12 bytes
+        0x00, // Request ID: 0
+        0x00, // Required Request ID Delta: 0
+        0x01, // Namespace field count: 1
+        0x07, // Field[0] length: 7
+        b'e', b'x', b'a', b'm', b'p', b'l', b'e', // "example"
+        0x00, // Number of Parameters: 0
+    ];
+
+    #[test]
+    fn encode_known_bytes() {
+        let msg = PublishNamespaceMessage {
+            request_id: 0,
+            required_request_id_delta: 0,
+            track_namespace: TrackNamespace {
+                fields: vec![b"example".to_vec()],
+            },
+        };
+        let mut buf = Vec::new();
+        msg.encode(&mut buf).unwrap();
+        assert_eq!(buf, PUBLISH_NAMESPACE_BASIC);
+    }
+
+    #[test]
+    fn decode_known_bytes() {
+        let mut slice = PUBLISH_NAMESPACE_BASIC.as_ref();
+        let decoded = PublishNamespaceMessage::decode(&mut slice).unwrap();
+        assert_eq!(decoded.request_id, 0);
+        assert_eq!(decoded.required_request_id_delta, 0);
+        assert_eq!(decoded.track_namespace.fields, vec![b"example".to_vec()]);
+        assert!(slice.is_empty());
+    }
 }

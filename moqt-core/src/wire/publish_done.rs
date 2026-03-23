@@ -107,4 +107,37 @@ mod tests {
         let mut slice = buf.as_slice();
         assert!(PublishDoneMessage::decode(&mut slice).is_err());
     }
+
+    /// Expected wire bytes for: status_code=0x2 (TRACK_ENDED), stream_count=5, empty reason
+    ///
+    /// Payload (3 bytes): status_code(1) + stream_count(1) + reason_len(1) = 3
+    const PUBLISH_DONE_BASIC: &[u8] = &[
+        0x0B, // Type: PUBLISH_DONE
+        0x00, 0x03, // Length: 3 bytes
+        0x02, // Status Code: TRACK_ENDED
+        0x05, // Stream Count: 5
+        0x00, // Reason Phrase Length: 0
+    ];
+
+    #[test]
+    fn encode_known_bytes() {
+        let msg = PublishDoneMessage {
+            status_code: 0x2,
+            stream_count: 5,
+            reason_phrase: ReasonPhrase { value: vec![] },
+        };
+        let mut buf = Vec::new();
+        msg.encode(&mut buf);
+        assert_eq!(buf, PUBLISH_DONE_BASIC);
+    }
+
+    #[test]
+    fn decode_known_bytes() {
+        let mut slice = PUBLISH_DONE_BASIC.as_ref();
+        let decoded = PublishDoneMessage::decode(&mut slice).unwrap();
+        assert_eq!(decoded.status_code, 0x2);
+        assert_eq!(decoded.stream_count, 5);
+        assert!(decoded.reason_phrase.value.is_empty());
+        assert!(slice.is_empty());
+    }
 }

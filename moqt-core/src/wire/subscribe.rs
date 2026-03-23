@@ -147,4 +147,50 @@ mod tests {
         let mut slice = buf.as_slice();
         assert!(SubscribeMessage::decode(&mut slice).is_err());
     }
+
+    /// Expected wire bytes for: request_id=2, namespace=["example"], track_name="audio", no params
+    ///
+    /// Payload (18 bytes):
+    ///   request_id(1) + delta(1) + ns_count(1) + field_len(1) + "example"(7)
+    ///   + name_len(1) + "audio"(5) + param_count(1) = 18
+    const SUBSCRIBE_NO_PARAMS: &[u8] = &[
+        0x03, // Type: SUBSCRIBE
+        0x00, 0x12, // Length: 18 bytes
+        0x02, // Request ID: 2
+        0x00, // Required Request ID Delta: 0
+        0x01, // Namespace field count: 1
+        0x07, // Field[0] length: 7
+        b'e', b'x', b'a', b'm', b'p', b'l', b'e', // "example"
+        0x05, // Track Name Length: 5
+        b'a', b'u', b'd', b'i', b'o', // "audio"
+        0x00, // Number of Parameters: 0
+    ];
+
+    #[test]
+    fn encode_known_bytes() {
+        let msg = SubscribeMessage {
+            request_id: 2,
+            required_request_id_delta: 0,
+            track_namespace: TrackNamespace {
+                fields: vec![b"example".to_vec()],
+            },
+            track_name: b"audio".to_vec(),
+            parameters: vec![],
+        };
+        let mut buf = Vec::new();
+        msg.encode(&mut buf).unwrap();
+        assert_eq!(buf, SUBSCRIBE_NO_PARAMS);
+    }
+
+    #[test]
+    fn decode_known_bytes() {
+        let mut slice = SUBSCRIBE_NO_PARAMS.as_ref();
+        let decoded = SubscribeMessage::decode(&mut slice).unwrap();
+        assert_eq!(decoded.request_id, 2);
+        assert_eq!(decoded.required_request_id_delta, 0);
+        assert_eq!(decoded.track_namespace.fields, vec![b"example".to_vec()]);
+        assert_eq!(decoded.track_name, b"audio");
+        assert!(decoded.parameters.is_empty());
+        assert!(slice.is_empty());
+    }
 }

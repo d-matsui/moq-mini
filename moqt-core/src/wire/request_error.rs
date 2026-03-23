@@ -107,4 +107,37 @@ mod tests {
         let mut slice = buf.as_slice();
         assert!(RequestErrorMessage::decode(&mut slice).is_err());
     }
+
+    /// Expected wire bytes for: error_code=0x0, retry_interval=1, empty reason
+    ///
+    /// Payload (3 bytes): error_code(1) + retry_interval(1) + reason_len(1) = 3
+    const REQUEST_ERROR_BASIC: &[u8] = &[
+        0x05, // Type: REQUEST_ERROR
+        0x00, 0x03, // Length: 3 bytes
+        0x00, // Error Code: INTERNAL_ERROR
+        0x01, // Retry Interval: 1 (immediate retry)
+        0x00, // Reason Phrase Length: 0
+    ];
+
+    #[test]
+    fn encode_known_bytes() {
+        let msg = RequestErrorMessage {
+            error_code: 0x0,
+            retry_interval: 1,
+            reason_phrase: ReasonPhrase { value: vec![] },
+        };
+        let mut buf = Vec::new();
+        msg.encode(&mut buf);
+        assert_eq!(buf, REQUEST_ERROR_BASIC);
+    }
+
+    #[test]
+    fn decode_known_bytes() {
+        let mut slice = REQUEST_ERROR_BASIC.as_ref();
+        let decoded = RequestErrorMessage::decode(&mut slice).unwrap();
+        assert_eq!(decoded.error_code, 0x0);
+        assert_eq!(decoded.retry_interval, 1);
+        assert!(decoded.reason_phrase.value.is_empty());
+        assert!(slice.is_empty());
+    }
 }

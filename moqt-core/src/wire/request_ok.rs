@@ -64,6 +64,31 @@ mod tests {
         assert!(RequestOkMessage::decode(&mut slice).is_err());
     }
 
+    /// Expected wire bytes for: empty REQUEST_OK (no parameters)
+    ///
+    /// Payload (1 byte): param_count(1) = 1
+    const REQUEST_OK_BASIC: &[u8] = &[
+        0x07, // Type: REQUEST_OK
+        0x00, 0x01, // Length: 1 byte
+        0x00, // Number of Parameters: 0
+    ];
+
+    #[test]
+    fn encode_known_bytes() {
+        let msg = RequestOkMessage {};
+        let mut buf = Vec::new();
+        msg.encode(&mut buf);
+        assert_eq!(buf, REQUEST_OK_BASIC);
+    }
+
+    #[test]
+    fn decode_known_bytes() {
+        let mut slice = REQUEST_OK_BASIC.as_ref();
+        let decoded = RequestOkMessage::decode(&mut slice).unwrap();
+        assert_eq!(decoded, RequestOkMessage {});
+        assert!(slice.is_empty());
+    }
+
     #[test]
     fn decode_with_parameters() {
         use crate::wire::varint::encode_varint;

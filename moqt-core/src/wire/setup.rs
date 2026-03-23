@@ -193,4 +193,31 @@ mod tests {
         let mut slice = buf.as_slice();
         assert!(SetupMessage::decode(&mut slice).is_err());
     }
+
+    /// Expected wire bytes for: server SETUP with empty options
+    ///
+    /// Type 0x2F00 encodes as 2-byte varint: 0xAF 0x00
+    /// Payload (0 bytes): no Key-Value-Pairs
+    const SETUP_EMPTY: &[u8] = &[
+        0xAF, 0x00, // Type: 0x2F00 (SETUP)
+        0x00, 0x00, // Length: 0 bytes
+    ];
+
+    #[test]
+    fn encode_known_bytes_empty() {
+        let msg = SetupMessage {
+            setup_options: vec![],
+        };
+        let mut buf = Vec::new();
+        msg.encode(&mut buf).unwrap();
+        assert_eq!(buf, SETUP_EMPTY);
+    }
+
+    #[test]
+    fn decode_known_bytes_empty() {
+        let mut slice = SETUP_EMPTY.as_ref();
+        let decoded = SetupMessage::decode(&mut slice).unwrap();
+        assert!(decoded.setup_options.is_empty());
+        assert!(slice.is_empty());
+    }
 }

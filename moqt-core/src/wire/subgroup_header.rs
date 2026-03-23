@@ -260,6 +260,45 @@ mod tests {
         assert_eq!(buf[0], 0x3C);
     }
 
+    /// Expected wire bytes for: track_alias=1, group_id=0,
+    /// no properties, end_of_group=true, no subgroup_id, default priority
+    ///
+    /// Type byte: bit4(1) | end_of_group(bit3) | default_priority(bit5)
+    ///          = 0x10 | 0x08 | 0x20 = 0x38
+    const SUBGROUP_HEADER_BASIC: &[u8] = &[
+        0x38, // Type: end_of_group + default_priority
+        0x01, // Track Alias: 1
+        0x00, // Group ID: 0
+    ];
+
+    #[test]
+    fn encode_known_bytes() {
+        let header = SubgroupHeader {
+            track_alias: 1,
+            group_id: 0,
+            has_properties: false,
+            end_of_group: true,
+            subgroup_id: None,
+            publisher_priority: None,
+        };
+        let mut buf = Vec::new();
+        header.encode(&mut buf);
+        assert_eq!(buf, SUBGROUP_HEADER_BASIC);
+    }
+
+    #[test]
+    fn decode_known_bytes() {
+        let mut slice = SUBGROUP_HEADER_BASIC.as_ref();
+        let decoded = SubgroupHeader::decode(&mut slice).unwrap();
+        assert_eq!(decoded.track_alias, 1);
+        assert_eq!(decoded.group_id, 0);
+        assert!(!decoded.has_properties);
+        assert!(decoded.end_of_group);
+        assert_eq!(decoded.subgroup_id, None);
+        assert_eq!(decoded.publisher_priority, None);
+        assert!(slice.is_empty());
+    }
+
     // 0x10 has DEFAULT_PRIORITY=0, so a Publisher Priority byte is required.
     // This test provides no priority byte, so decode fails with truncation.
     #[test]

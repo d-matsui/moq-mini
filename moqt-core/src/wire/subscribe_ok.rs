@@ -144,4 +144,36 @@ mod tests {
         let mut slice = buf.as_slice();
         assert!(SubscribeOkMessage::decode(&mut slice).is_err());
     }
+
+    /// Expected wire bytes for: track_alias=1, no params, no track properties
+    ///
+    /// Payload (2 bytes): track_alias(1) + param_count(1) = 2
+    const SUBSCRIBE_OK_BASIC: &[u8] = &[
+        0x04, // Type: SUBSCRIBE_OK
+        0x00, 0x02, // Length: 2 bytes
+        0x01, // Track Alias: 1
+        0x00, // Number of Parameters: 0
+    ];
+
+    #[test]
+    fn encode_known_bytes() {
+        let msg = SubscribeOkMessage {
+            track_alias: 1,
+            parameters: vec![],
+            track_properties_raw: vec![],
+        };
+        let mut buf = Vec::new();
+        msg.encode(&mut buf).unwrap();
+        assert_eq!(buf, SUBSCRIBE_OK_BASIC);
+    }
+
+    #[test]
+    fn decode_known_bytes() {
+        let mut slice = SUBSCRIBE_OK_BASIC.as_ref();
+        let decoded = SubscribeOkMessage::decode(&mut slice).unwrap();
+        assert_eq!(decoded.track_alias, 1);
+        assert!(decoded.parameters.is_empty());
+        assert!(decoded.track_properties_raw.is_empty());
+        assert!(slice.is_empty());
+    }
 }
