@@ -131,7 +131,7 @@ Key design decisions:
 - **Track Alias translation** — the relay maintains separate alias tables per side
 - **NextGroupStart filter only** — subscribers always start from the next keyframe
 
-See [`docs/design/`](docs/design/) for detailed architecture documents.
+See [`docs/design/`](docs/design/) for detailed architecture documents (Japanese).
 
 ## Spec Reference
 

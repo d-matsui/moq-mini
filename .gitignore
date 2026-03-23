@@ -2,3 +2,5 @@ CLAUDE.md
 .claude
 /target/
 /certs/
+.reports/
+docs/CODEMAPS/
