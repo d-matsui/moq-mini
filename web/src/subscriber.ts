@@ -50,11 +50,6 @@ async function start() {
   receiveLoop();
 }
 
-// The currently active group reader. When a new group arrives,
-// the old one is abandoned (its remaining objects are discarded).
-let activeGroupId = -1;
-let activeAbort: AbortController | null = null;
-
 async function receiveLoop() {
   if (!session || !decoder) return;
 
@@ -65,43 +60,24 @@ async function receiveLoop() {
 
       const group = event.reader;
 
-      // Skip if this group is older than the active one
-      if (group.groupId <= activeGroupId) continue;
-
-      // Cancel the previous group reader
-      if (activeAbort) {
-        activeAbort.abort();
-      }
-
-      activeGroupId = group.groupId;
-      const abort = new AbortController();
-      activeAbort = abort;
-
-      // Process this group in the background
-      processGroup(group, abort.signal);
+      // Process each group in the background (no cancellation)
+      processGroup(group);
     }
   } catch (e) {
     log(`Receive ended: ${e}`);
   }
 }
 
-async function processGroup(group: SubgroupReader, signal: AbortSignal) {
+async function processGroup(group: SubgroupReader) {
   log(`Group ${group.groupId} (alias=${group.trackAlias})`);
-
-  // Flush decoder to clear any frames from previous group
-  if (decoder && decoder.state === "configured") {
-    await decoder.flush();
-  }
 
   let isFirstObject = true;
   let objectCount = 0;
 
   try {
-    while (!signal.aborted) {
+    while (true) {
       const payload = await group.readObject();
       if (payload === null) break;
-
-      if (signal.aborted) break;
 
       if (decoder && decoder.state === "configured") {
         const type = isFirstObject ? "key" : "delta";
@@ -118,19 +94,10 @@ async function processGroup(group: SubgroupReader, signal: AbortSignal) {
       objectCount++;
     }
   } catch (e) {
-    if (!signal.aborted) {
-      log(`Group ${group.groupId} error: ${e}`);
-    }
-  } finally {
-    if (signal.aborted) {
-      // New group arrived, cancel this stream (sends STOP_SENDING)
-      await group.cancel().catch(() => {});
-    }
+    log(`Group ${group.groupId} error: ${e}`);
   }
 
-  if (!signal.aborted) {
-    log(`  Group ${group.groupId}: ${objectCount} objects`);
-  }
+  log(`  Group ${group.groupId}: ${objectCount} objects`);
 }
 
 async function stop() {

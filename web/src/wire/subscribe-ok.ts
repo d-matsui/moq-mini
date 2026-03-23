@@ -15,8 +15,7 @@ export function encodeSubscribeOk(msg: SubscribeOkMessage): Uint8Array {
   const payload: number[] = [];
   payload.push(...encodeVarint(msg.trackAlias));
   encodeParameters(msg.parameters, payload);
-  // Track Properties: length-prefixed raw bytes
-  payload.push(...encodeVarint(msg.trackPropertiesRaw.length));
+  // Track Properties: KVPs directly at end of message (no length prefix)
   payload.push(...msg.trackPropertiesRaw);
   return encodeMessage(MSG_SUBSCRIBE_OK, new Uint8Array(payload));
 }
@@ -31,8 +30,9 @@ export function decodeSubscribeOk(frame: Uint8Array): SubscribeOkMessage {
   pos += r1;
   const { params: parameters, bytesRead: r2 } = decodeParameters(payload, pos);
   pos += r2;
-  const { value: propsLen, bytesRead: r3 } = decodeVarint(payload, pos);
-  pos += r3;
-  const trackPropertiesRaw = payload.slice(pos, pos + propsLen);
+  // Track Properties: remaining bytes are KVPs (no length prefix)
+  const trackPropertiesRaw = pos < payload.length
+    ? payload.slice(pos)
+    : new Uint8Array(0);
   return { trackAlias, parameters, trackPropertiesRaw };
 }

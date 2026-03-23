@@ -7,19 +7,20 @@ import { encodeKeyValuePairs, decodeKeyValuePairs } from "./key-value-pair.js";
 import type { KeyValuePair } from "./key-value-pair.js";
 
 // Setup option type IDs (must match Rust: setup.rs)
-export const SETUP_PATH = 0x01;       // odd = bytes
-export const SETUP_AUTHORITY = 0x05;   // odd = bytes
+export const SETUP_PATH = 0x01;           // odd = bytes
+export const SETUP_IMPLEMENTATION = 0x07; // odd = bytes
 
 export interface SetupMessage {
   options: KeyValuePair[];
 }
 
-/** Create a client SETUP message with PATH and AUTHORITY. */
-export function clientSetup(path: string, authority: string): SetupMessage {
+/** Create a client SETUP message.
+ *  Over WebTransport, PATH and AUTHORITY are in the HTTP/3 CONNECT request,
+ *  so only IMPLEMENTATION is sent here. */
+export function clientSetup(): SetupMessage {
   return {
     options: [
-      { typeId: SETUP_PATH, value: new TextEncoder().encode(path) },
-      { typeId: SETUP_AUTHORITY, value: new TextEncoder().encode(authority) },
+      { typeId: SETUP_IMPLEMENTATION, value: new TextEncoder().encode("moq-minimal") },
     ],
   };
 }

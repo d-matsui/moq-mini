@@ -46,8 +46,7 @@ impl SubscribeOkMessage {
         let mut payload = Vec::new();
         encode_varint(self.track_alias, &mut payload);
         encode_parameters(&self.parameters, &mut payload)?;
-        // Track Properties: write length + raw bytes
-        encode_varint(self.track_properties_raw.len() as u64, &mut payload);
+        // Track Properties: KVPs directly at end of message (no length prefix)
         payload.extend_from_slice(&self.track_properties_raw);
         encode_message(MSG_SUBSCRIBE_OK, &payload, buf);
         Ok(())
@@ -62,10 +61,8 @@ impl SubscribeOkMessage {
         let mut p = payload.as_slice();
         let track_alias = decode_varint(&mut p)?;
         let parameters = decode_parameters(&mut p)?;
-        // Preserve Track Properties as raw bytes for forwarding
-        let props_len = decode_varint(&mut p)? as usize;
-        ensure!(p.len() >= props_len, "track properties truncated");
-        let track_properties_raw = p[..props_len].to_vec();
+        // Track Properties: remaining bytes are KVPs (no length prefix)
+        let track_properties_raw = p.to_vec();
         Ok(SubscribeOkMessage {
             track_alias,
             parameters,

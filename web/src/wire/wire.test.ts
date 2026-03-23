@@ -12,10 +12,10 @@ import { subscriptionFilterNextGroupStart } from "./parameter.js";
 
 describe("setup", () => {
   it("roundtrip client setup", () => {
-    const msg = clientSetup("/", "localhost");
+    const msg = clientSetup();
     const buf = encodeSetup(msg);
     const decoded = decodeSetup(buf);
-    expect(decoded.options.length).toBe(2);
+    expect(decoded.options.length).toBe(1);
   });
 });
 

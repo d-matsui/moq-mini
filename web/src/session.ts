@@ -11,6 +11,7 @@ import { StreamReader } from "./stream/stream-reader.js";
 import { encodeSetup, decodeSetup, clientSetup } from "./wire/setup.js";
 import {
   encodePublishNamespace,
+  decodePublishNamespace,
   type PublishNamespaceMessage,
 } from "./wire/publish-namespace.js";
 import { encodeSubscribe, decodeSubscribe, type SubscribeMessage } from "./wire/subscribe.js";
@@ -19,8 +20,9 @@ import {
   decodeSubscribeOk,
   type SubscribeOkMessage,
 } from "./wire/subscribe-ok.js";
-import { decodeRequestOk } from "./wire/request-ok.js";
+import { encodeRequestOk, decodeRequestOk } from "./wire/request-ok.js";
 import { encodePublishDone, decodePublishDone, type PublishDoneMessage } from "./wire/publish-done.js";
+import { encodeRequestError, ERROR_DOES_NOT_EXIST, ERROR_UNINTERESTED } from "./wire/request-error.js";
 import { decodeMessage } from "./wire/message.js";
 import {
   MSG_SUBSCRIBE,
@@ -29,6 +31,7 @@ import {
   MSG_REQUEST_ERROR,
   MSG_PUBLISH_DONE,
   MSG_PUBLISH_NAMESPACE,
+  MSG_SUBSCRIBE_NAMESPACE,
 } from "./wire/message.js";
 import {
   encodeSubgroupHeader,
@@ -41,7 +44,16 @@ import {
   subscriptionFilterNextGroupStart,
   type MessageParameter,
 } from "./wire/parameter.js";
-import { encodeVarint } from "./wire/varint.js";
+import { encodeVarint, decodeVarint } from "./wire/varint.js";
+import type { TrackNamespace } from "./wire/track-namespace.js";
+import { decodeTrackNamespace, trackNamespaceFrom } from "./wire/track-namespace.js";
+import { encodeNamespace } from "./wire/namespace.js";
+
+/** Format a TrackNamespace as a human-readable string, e.g. ["anon", "example"]. */
+function formatNs(ns: TrackNamespace): string {
+  const decoder = new TextDecoder();
+  return "[" + ns.fields.map(f => `"${decoder.decode(f)}"`).join(", ") + "]";
+}
 
 let openStreams = 0;
 
@@ -170,6 +182,7 @@ export type SessionEvent =
 export class MoqtSession {
   private transport: WebTransport;
   private nextRequestId = 0;
+  private publishedNamespaces: TrackNamespace[] = [];
 
   private constructor(transport: WebTransport) {
     this.transport = transport;
@@ -180,31 +193,48 @@ export class MoqtSession {
    *                   Required for self-signed certificates.
    */
   static async connect(url: string): Promise<MoqtSession> {
-    const transport = new WebTransport(url);
+    console.log(`[session] connecting to ${url}...`);
+    const transport = new WebTransport(url, { protocols: ['moqt-17'] });
+
+    transport.closed.then(
+      (info) => console.log("[session] transport closed:", info),
+      (err) => console.error("[session] transport closed with error:", err),
+    );
+
+    console.log("[session] waiting for transport.ready...");
     await transport.ready;
+    console.log("[session] transport ready");
 
     const session = new MoqtSession(transport);
     await session.setupExchange();
+    console.log("[session] SETUP exchange complete");
     return session;
   }
 
   private async setupExchange(): Promise<void> {
     // Send SETUP on a new unidirectional stream
+    console.log("[setup] creating unidirectional stream...");
     const sendStream = await this.transport.createUnidirectionalStream();
     const writer = sendStream.getWriter();
     // WebTransport: PATH/AUTHORITY are in the HTTP/3 CONNECT request, not SETUP
-    const setupMsg = { options: [] };
-    await writer.write(encodeSetup(setupMsg));
+    const setupMsg = clientSetup();
+    const encoded = encodeSetup(setupMsg);
+    console.log("[setup] sending SETUP:", Array.from(encoded).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    await writer.write(encoded);
+    console.log("[setup] SETUP sent");
     // Don't close the control stream (must stay open per spec)
 
     // Read relay's SETUP from an incoming unidirectional stream
+    console.log("[setup] waiting for incoming unidirectional stream...");
     const uniReader = this.transport.incomingUnidirectionalStreams.getReader();
     const { value: recvStream } = await uniReader.read();
     uniReader.releaseLock();
     if (!recvStream) throw new Error("no incoming control stream");
 
+    console.log("[setup] received incoming stream, reading SETUP...");
     const reader = new StreamReader(recvStream);
     const frame = await reader.readMessageFrame();
+    console.log("[setup] server SETUP frame:", Array.from(frame).map(b => b.toString(16).padStart(2, '0')).join(' '));
     const _serverSetup = decodeSetup(frame);
   }
 
@@ -236,6 +266,7 @@ export class MoqtSession {
     if (msgType !== MSG_REQUEST_OK) {
       throw new Error(`unexpected response: 0x${msgType.toString(16)}`);
     }
+    this.publishedNamespaces.push(trackNamespaceFrom(namespace));
   }
 
   /** Subscribe to a track. */
@@ -255,11 +286,16 @@ export class MoqtSession {
       trackName: new TextEncoder().encode(trackName),
       parameters: params,
     };
-    await writer.write(encodeSubscribe(msg));
+    const encoded = encodeSubscribe(msg);
+    console.log(`[subscribe] sending SUBSCRIBE: reqId=${msg.requestId} ns=${formatNs(msg.trackNamespace)} track="${trackName}" raw=${Array.from(encoded).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+    await writer.write(encoded);
+    console.log("[subscribe] SUBSCRIBE sent, waiting for response...");
 
     const frame = await reader.readMessageFrame();
+    console.log(`[subscribe] response: ${Array.from(frame).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
     const { msgType } = decodeMessage(frame, 0);
     if (msgType === MSG_REQUEST_ERROR) {
+      console.log("[subscribe] SUBSCRIBE rejected with REQUEST_ERROR");
       throw new Error("SUBSCRIBE rejected");
     }
     if (msgType !== MSG_SUBSCRIBE_OK) {
@@ -295,6 +331,31 @@ export class MoqtSession {
           const writer = stream.writable.getWriter();
           return { type: "subscribe", request: new SubscribeRequest(sub, writer) };
         }
+        if (msgType === MSG_PUBLISH_NAMESPACE) {
+          const pubNs = decodePublishNamespace(frame);
+          const writer = stream.writable.getWriter();
+          await writer.write(encodeRequestError({
+            errorCode: ERROR_UNINTERESTED,
+            retryInterval: 0,
+            reasonPhrase: "",
+          }));
+          console.log(`[session] received PUBLISH_NAMESPACE: reqId=${pubNs.requestId} ns=${formatNs(pubNs.trackNamespace)}, sent UNINTERESTED`);
+          return this.nextEvent();
+        }
+        if (msgType === MSG_SUBSCRIBE_NAMESPACE) {
+          const { payload } = decodeMessage(frame, 0);
+          let pos = 0;
+          const { value: reqId, bytesRead: r1 } = decodeVarint(payload, pos); pos += r1;
+          const { value: reqIdDelta, bytesRead: r2 } = decodeVarint(payload, pos); pos += r2;
+          const { ns: nsPrefix, bytesRead: r3 } = decodeTrackNamespace(payload, pos); pos += r3;
+          const { value: subOpts, bytesRead: r4 } = decodeVarint(payload, pos); pos += r4;
+
+          const writer = stream.writable.getWriter();
+          await writer.write(encodeRequestOk({ parameters: [] }));
+          console.log(`[session] received SUBSCRIBE_NAMESPACE: reqId=${reqId} prefix=${formatNs(nsPrefix)} opts=${subOpts}, sent REQUEST_OK`);
+          return this.nextEvent();
+        }
+        console.warn(`[session] unexpected bidi message: type=0x${msgType.toString(16)}, raw=${Array.from(frame).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
         throw new Error(`unexpected bidi message: 0x${msgType.toString(16)}`);
       }
 

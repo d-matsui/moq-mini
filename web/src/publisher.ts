@@ -99,7 +99,7 @@ async function handleEncodedChunk(chunk: EncodedVideoChunk) {
   // Keyframe starts a new group
   if (chunk.type === "key" && groupStarted) {
     if (currentGroup) {
-      await currentGroup.finish();
+      currentGroup.finish().catch(() => {});
       streamCount++;
       log(`Sent group ${groupId}`);
     }
