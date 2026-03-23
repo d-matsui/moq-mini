@@ -55,12 +55,12 @@ async fn main() -> anyhow::Result<()> {
         .map(|s| s.as_str())
         .unwrap_or("127.0.0.1:4433")
         .parse()?;
-    let namespace = args
+    let namespace_raw = args
         .iter()
         .position(|a| a == "--ns")
         .and_then(|i| args.get(i + 1))
         .map(|s| s.as_str())
-        .unwrap_or("example");
+        .unwrap_or("daiki/example");
     let track_name = args
         .iter()
         .position(|a| a == "--track")
@@ -73,7 +73,8 @@ async fn main() -> anyhow::Result<()> {
     info!("connected, SETUP exchange complete");
 
     // === PUBLISH_NAMESPACE ===
-    let ns = TrackNamespace::from(&[namespace] as &[&str]);
+    let ns_fields: Vec<&str> = namespace_raw.split('/').filter(|s| !s.is_empty()).collect();
+    let ns = TrackNamespace::from(ns_fields.as_slice());
     session.publish_namespace(ns.clone()).await?;
     info!("PUBLISH_NAMESPACE registered");
 
