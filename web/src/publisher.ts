@@ -18,14 +18,15 @@ const KEYFRAME_INTERVAL = 60; // Request keyframe every 60 frames (~2s at 30fps)
 
 async function start() {
   const url = ($("relay-url") as HTMLInputElement).value;
-  const namespace = ($("namespace") as HTMLInputElement).value;
+  const namespaceRaw = ($("namespace") as HTMLInputElement).value;
+  const namespace = namespaceRaw.split("/").filter((s) => s.length > 0);
   const trackName = ($("track-name") as HTMLInputElement).value;
   log("Connecting...");
   session = await MoqtSession.connect(url);
   log("Connected. SETUP complete.");
 
   log("Registering namespace...");
-  await session.publishNamespace([namespace]);
+  await session.publishNamespace(namespace);
   log("PUBLISH_NAMESPACE registered.");
 
   log("Waiting for SUBSCRIBE...");

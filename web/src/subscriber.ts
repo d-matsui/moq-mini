@@ -13,7 +13,8 @@ let ctx: CanvasRenderingContext2D;
 
 async function start() {
   const url = ($("relay-url") as HTMLInputElement).value;
-  const namespace = ($("namespace") as HTMLInputElement).value;
+  const namespaceRaw = ($("namespace") as HTMLInputElement).value;
+  const namespace = namespaceRaw.split("/").filter((s) => s.length > 0);
   const trackName = ($("track-name") as HTMLInputElement).value;
 
   canvas = $("canvas") as HTMLCanvasElement;
@@ -24,7 +25,7 @@ async function start() {
   log("Connected. SETUP complete.");
 
   log("Subscribing...");
-  const subscription = await session.subscribe([namespace], trackName);
+  const subscription = await session.subscribe(namespace, trackName);
   log(`Subscribed (alias=${subscription.trackAlias}).`);
 
   // Set up WebCodecs VideoDecoder (VP8)
