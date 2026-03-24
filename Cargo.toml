@@ -4,6 +4,7 @@ members = [
     "moqt-relay",
     "moqt-pub",
     "moqt-sub",
+    "msf",
 ]
 resolver = "2"
 
