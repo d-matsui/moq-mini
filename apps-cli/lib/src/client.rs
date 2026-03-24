@@ -9,8 +9,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use rustls_pki_types::CertificateDer;
 
-use crate::quic_config;
-use crate::session::MoqtSession;
+use moqt::quic_config;
+use moqt::session::MoqtSession;
 
 /// TLS configuration for the client connection.
 pub enum TlsConfig {
@@ -95,4 +95,17 @@ fn make_insecure_client_config() -> Result<quinn::ClientConfig> {
     let quic_config = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
         .context("failed to create insecure QUIC client config")?;
     Ok(quinn::ClientConfig::new(Arc::new(quic_config)))
+}
+
+/// Parse relay address from CLI arguments.
+/// Finds the first argument that looks like a socket address (contains ':' and doesn't start with '-').
+/// Defaults to "127.0.0.1:4433".
+pub fn parse_relay_addr(args: &[String]) -> Result<SocketAddr> {
+    let addr_str = args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-') && a.contains(':'))
+        .map(|s| s.as_str())
+        .unwrap_or("127.0.0.1:4433");
+    addr_str.parse().map_err(Into::into)
 }

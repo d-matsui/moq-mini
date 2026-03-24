@@ -3,10 +3,11 @@ members = [
     "moqt",
     "relay",
     "msf",
-    "apps-cli/pub",
-    "apps-cli/sub",
-    "apps-cli/msf-pub",
-    "apps-cli/msf-sub",
+    "apps-cli/lib",
+    "apps-cli/ivf-publisher",
+    "apps-cli/ivf-subscriber",
+    "apps-cli/msf-publisher",
+    "apps-cli/msf-subscriber",
 ]
 resolver = "2"
 

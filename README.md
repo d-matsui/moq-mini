@@ -30,7 +30,8 @@ The relay supports both **raw QUIC** (ALPN: `moqt-17`) and **WebTransport** (ALP
 moqt/          # Shared library — wire protocol, stream I/O, session logic
 relay/         # Relay server binary
 msf/           # MSF library (catalog, LOC)
-apps-cli/      # CLI clients (pub, sub, msf-pub, msf-sub)
+apps-cli/      # CLI clients (ivf-publisher, ivf-subscriber, msf-publisher, msf-subscriber)
+  lib/         #   Shared library (client, init, ivf)
 apps-web/      # Browser client (TypeScript + WebTransport)
   src/lib/     #   MoQT library (wire, session, stream, loc)
   src/app/     #   Apps (publisher, subscriber, msf-*)
@@ -75,7 +76,7 @@ Stream a test video pattern through the full pipeline:
 ./scripts/e2e-video-test.sh
 ```
 
-This runs: ffmpeg (VP8 test source) → pub → relay → sub → ffplay
+This runs: ffmpeg (VP8 test source) → ivf-publisher → relay → ivf-subscriber → ffplay
 
 ## Usage
 
@@ -85,24 +86,25 @@ This runs: ffmpeg (VP8 test source) → pub → relay → sub → ffplay
 cargo run --bin relay -- --cert certs/localhost+2.pem --key certs/localhost+2-key.pem
 ```
 
-### Publisher
+### Publisher (IVF/VP8)
 
 ```bash
-# Demo mode — sends dummy data
-cargo run --bin pub
-
-# Pipe mode — publish VP8/IVF video from stdin
-ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin pub -- --pipe
+# Pipe VP8/IVF video from stdin
+ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin ivf-publisher
 ```
 
-### Subscriber
+### Subscriber (IVF/VP8)
 
 ```bash
-# Default — prints received objects to stderr
-cargo run --bin sub
+# Output IVF to stdout for playback
+cargo run --bin ivf-subscriber | ffplay -f ivf -
+```
 
-# Pipe mode — outputs IVF to stdout for playback
-cargo run --bin sub -- --pipe | ffplay -f ivf -
+### MSF Publisher/Subscriber (catalog-based)
+
+```bash
+ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin msf-publisher
+cargo run --bin msf-subscriber | ffplay -f ivf -
 ```
 
 ### Web Client

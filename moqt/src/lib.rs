@@ -8,7 +8,6 @@
 //! - `stream`: ストリーム上のフレーミング（読み書き）
 //! - `session`: プロトコルロジックと高レベル API（SETUP ハンドシェイク、イベントディスパッチ）
 
-pub mod client;
 pub mod quic_config;
 pub mod session;
 pub mod stream;

@@ -1,12 +1,13 @@
 [package]
-name = "pub"
+name = "msf-subscriber"
 version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
 moqt = { path = "../../moqt" }
+msf = { path = "../../msf" }
+cli-lib = { path = "../lib" }
 anyhow.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
-rustls.workspace = true
+serde_json = "1"
 tokio.workspace = true

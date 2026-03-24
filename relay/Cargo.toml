@@ -16,3 +16,6 @@ rustls-pemfile = "2"
 tokio.workspace = true
 url.workspace = true
 web-transport-quinn.workspace = true
+
+[dev-dependencies]
+cli-lib = { path = "../apps-cli/lib" }

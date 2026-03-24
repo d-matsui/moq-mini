@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Once};
 
-use moqt::client::{self, TlsConfig};
+use cli_lib::client::{self, TlsConfig};
 use moqt::quic_config;
 use moqt::session::{MoqtSession, SessionEvent};
 use moqt::wire::parameter::{MessageParameter, SubscriptionFilter};
