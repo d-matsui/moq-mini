@@ -631,6 +631,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "msf-pub"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moqt-core",
+ "msf",
+ "rustls",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "msf-sub"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "moqt-core",
+ "msf",
+ "rustls",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

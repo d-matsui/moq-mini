@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes() {
-        let mut slice = SUBGROUP_HEADER_BASIC.as_ref();
+        let mut slice = SUBGROUP_HEADER_BASIC;
         let decoded = SubgroupHeader::decode(&mut slice).unwrap();
         assert_eq!(decoded.track_alias, 1);
         assert_eq!(decoded.group_id, 0);

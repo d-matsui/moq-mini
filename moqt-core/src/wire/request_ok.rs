@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes() {
-        let mut slice = REQUEST_OK_BASIC.as_ref();
+        let mut slice = REQUEST_OK_BASIC;
         let decoded = RequestOkMessage::decode(&mut slice).unwrap();
         assert_eq!(decoded, RequestOkMessage {});
         assert!(slice.is_empty());

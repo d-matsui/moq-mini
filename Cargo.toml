@@ -5,6 +5,8 @@ members = [
     "moqt-pub",
     "moqt-sub",
     "msf",
+    "msf-pub",
+    "msf-sub",
 ]
 resolver = "2"
 

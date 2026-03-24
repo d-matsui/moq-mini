@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes() {
-        let mut slice = PUBLISH_NAMESPACE_BASIC.as_ref();
+        let mut slice = PUBLISH_NAMESPACE_BASIC;
         let decoded = PublishNamespaceMessage::decode(&mut slice).unwrap();
         assert_eq!(decoded.request_id, 0);
         assert_eq!(decoded.required_request_id_delta, 0);

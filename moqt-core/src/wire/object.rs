@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes() {
-        let mut slice = OBJECT_BASIC.as_ref();
+        let mut slice = OBJECT_BASIC;
         let decoded = ObjectHeader::decode(&mut slice, false).unwrap();
         assert_eq!(decoded.object_id_delta, 0);
         assert_eq!(decoded.payload_length, 100);

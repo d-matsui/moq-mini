@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes_empty() {
-        let mut slice = SETUP_EMPTY.as_ref();
+        let mut slice = SETUP_EMPTY;
         let decoded = SetupMessage::decode(&mut slice).unwrap();
         assert!(decoded.setup_options.is_empty());
         assert!(slice.is_empty());

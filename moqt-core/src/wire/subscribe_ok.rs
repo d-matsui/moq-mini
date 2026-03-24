@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes() {
-        let mut slice = SUBSCRIBE_OK_BASIC.as_ref();
+        let mut slice = SUBSCRIBE_OK_BASIC;
         let decoded = SubscribeOkMessage::decode(&mut slice).unwrap();
         assert_eq!(decoded.track_alias, 1);
         assert!(decoded.parameters.is_empty());

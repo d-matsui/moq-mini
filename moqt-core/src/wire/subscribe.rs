@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes() {
-        let mut slice = SUBSCRIBE_NO_PARAMS.as_ref();
+        let mut slice = SUBSCRIBE_NO_PARAMS;
         let decoded = SubscribeMessage::decode(&mut slice).unwrap();
         assert_eq!(decoded.request_id, 2);
         assert_eq!(decoded.required_request_id_delta, 0);

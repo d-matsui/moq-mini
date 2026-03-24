@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes() {
-        let mut slice = REQUEST_ERROR_BASIC.as_ref();
+        let mut slice = REQUEST_ERROR_BASIC;
         let decoded = RequestErrorMessage::decode(&mut slice).unwrap();
         assert_eq!(decoded.error_code, 0x0);
         assert_eq!(decoded.retry_interval, 1);

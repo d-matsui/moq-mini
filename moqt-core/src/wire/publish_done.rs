@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn decode_known_bytes() {
-        let mut slice = PUBLISH_DONE_BASIC.as_ref();
+        let mut slice = PUBLISH_DONE_BASIC;
         let decoded = PublishDoneMessage::decode(&mut slice).unwrap();
         assert_eq!(decoded.status_code, 0x2);
         assert_eq!(decoded.stream_count, 5);
