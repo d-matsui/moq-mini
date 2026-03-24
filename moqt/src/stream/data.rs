@@ -140,6 +140,23 @@ impl DataStreamWriter {
         Ok(())
     }
 
+    /// Write an Object with Object Properties (header + properties + payload).
+    /// Properties are length-prefixed on the wire.
+    pub async fn write_object_with_properties(
+        &mut self,
+        header: &ObjectHeader,
+        payload: &[u8],
+        properties: &[u8],
+    ) -> Result<()> {
+        let mut buf = Vec::new();
+        header.encode(&mut buf);
+        crate::wire::varint::encode_varint(properties.len() as u64, &mut buf);
+        buf.extend_from_slice(properties);
+        buf.extend_from_slice(payload);
+        self.stream.write_all(&buf).await?;
+        Ok(())
+    }
+
     /// Write raw bytes to the stream (for pass-through forwarding).
     pub async fn write_raw(&mut self, data: &[u8]) -> Result<()> {
         self.stream.write_all(data).await?;

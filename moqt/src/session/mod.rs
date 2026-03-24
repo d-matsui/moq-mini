@@ -264,25 +264,46 @@ impl MoqtSession {
         }
     }
 
-    /// Open a subgroup for writing objects.
-    /// Creates a data stream with the given SubgroupHeader fields
-    /// and returns a `SubgroupWriter` that accepts payloads only.
+    /// Open a subgroup for writing objects (no Object Properties).
     pub async fn open_subgroup(
         &self,
         track_alias: u64,
         group_id: u64,
         subgroup_id: u64,
     ) -> Result<SubgroupWriter> {
+        self.open_subgroup_inner(track_alias, group_id, subgroup_id, false)
+            .await
+    }
+
+    /// Open a subgroup with the PROPERTIES flag set.
+    /// Objects must be written with `write_object_with_properties`.
+    pub async fn open_subgroup_with_properties(
+        &self,
+        track_alias: u64,
+        group_id: u64,
+        subgroup_id: u64,
+    ) -> Result<SubgroupWriter> {
+        self.open_subgroup_inner(track_alias, group_id, subgroup_id, true)
+            .await
+    }
+
+    async fn open_subgroup_inner(
+        &self,
+        track_alias: u64,
+        group_id: u64,
+        subgroup_id: u64,
+        has_properties: bool,
+    ) -> Result<SubgroupWriter> {
         let header = SubgroupHeader {
             track_alias,
             group_id,
-            has_properties: false,
+            has_properties,
             end_of_group: true,
             subgroup_id: Some(subgroup_id),
             publisher_priority: None,
         };
         let writer = self.open_data_stream(&header).await?;
-        Ok(SubgroupWriter::new(writer))
+        Ok(SubgroupWriter::new(writer, has_properties))
     }
 
     /// Open an outgoing data stream (unidirectional).

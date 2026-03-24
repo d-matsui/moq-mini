@@ -1,8 +1,7 @@
 // MSF Browser Subscriber
 // Subscribes to catalog to discover tracks, then subscribes to
-// H.264 video and Opus audio tracks, decoding with WebCodecs.
-// LOC CaptureTimestamp is used for A/V lip sync: both audio and video
-// are scheduled on a shared timeline (AudioContext clock + buffer offset).
+// video (and optionally audio) tracks, decoding with WebCodecs.
+// CaptureTimestamp from LOC Header Extensions is used for playback timing.
 
 import { MoqtSession, SubgroupReader } from "../lib/session.js";
 import { decodeExtensions } from "../lib/loc.js";
@@ -10,20 +9,24 @@ import { decodeExtensions } from "../lib/loc.js";
 const $ = (id: string) => document.getElementById(id)!;
 
 const CATALOG_TRACK_NAME = "catalog";
-const BUFFER_SEC = 1.0; // 1000ms buffer for both audio and video
 
 let session: MoqtSession | null = null;
 let videoDecoder: VideoDecoder | null = null;
-let audioDecoder: AudioDecoder | null = null;
-let audioCtx: AudioContext | null = null;
-// Shared sync state: captureTimeBase is the first CaptureTimestamp received
-// (from either audio or video), and playBase is the AudioContext time at which
-// that timestamp should be presented (= audioCtx.currentTime + BUFFER_SEC).
-let captureTimeBase: number | null = null;
-let playBase: number | null = null;
-let nextAudioPlayTime: number | null = null; // accumulated play time for gapless audio
 let canvas: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D;
+
+// Frame queue: received frames are pushed here, playback loop pops and paces.
+interface QueuedFrame {
+  type: "key" | "delta";
+  timestamp: number; // CaptureTimestamp (μs)
+  data: Uint8Array;
+}
+const frameQueue: QueuedFrame[] = [];
+let playbackRunning = false;
+
+// Pacing state
+let firstTimestamp: number | null = null;
+let startTime: number | null = null;
 
 // --- Catalog types ---
 
@@ -49,7 +52,7 @@ interface MsfTrack {
 
 // --- LOC helpers ---
 
-/** Extract CaptureTimestamp from Object Properties, if present. */
+/** Extract CaptureTimestamp (μs) from Object Properties. */
 function extractTimestamp(properties: Uint8Array | null): number | null {
   if (!properties || properties.length === 0) return null;
   try {
@@ -63,59 +66,55 @@ function extractTimestamp(properties: Uint8Array | null): number | null {
   return null;
 }
 
-/** Initialize shared sync base on first media timestamp. */
-function initSyncBase(rawTimestampUs: number): void {
-  if (captureTimeBase !== null) return;
-  captureTimeBase = rawTimestampUs;
-  playBase = audioCtx!.currentTime + BUFFER_SEC;
+// --- Playback loop: pop from queue, pace, decode ---
+
+async function startPlaybackLoop() {
+  if (playbackRunning) return;
+  playbackRunning = true;
+
+  while (playbackRunning) {
+    const frame = frameQueue.shift();
+    if (!frame) {
+      // Queue empty — wait a bit and check again
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      continue;
+    }
+
+    // Pace: wait until it's time to decode this frame
+    if (firstTimestamp === null) {
+      firstTimestamp = frame.timestamp;
+      startTime = performance.now();
+    } else {
+      const target = (frame.timestamp - firstTimestamp) / 1000; // μs → ms
+      const elapsed = performance.now() - startTime!;
+      const delay = target - elapsed;
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    if (videoDecoder && videoDecoder.state === "configured") {
+      videoDecoder.decode(
+        new EncodedVideoChunk({
+          type: frame.type,
+          timestamp: frame.timestamp,
+          data: frame.data,
+        })
+      );
+    }
+  }
 }
 
-/** Convert a raw CaptureTimestamp (μs) to an AudioContext play time (seconds). */
-function toPlayTime(rawTimestampUs: number): number {
-  const captureTimeSec = (rawTimestampUs - captureTimeBase!) / 1_000_000;
-  return playBase! + captureTimeSec;
-}
-
-// --- Audio playback (AudioBufferSourceNode with accumulated timing) ---
-
-function playAudioData(audioData: AudioData) {
-  if (!audioCtx) {
-    audioData.close();
-    return;
+function drawFrame(frame: VideoFrame) {
+  if (
+    canvas.width !== frame.displayWidth ||
+    canvas.height !== frame.displayHeight
+  ) {
+    canvas.width = frame.displayWidth;
+    canvas.height = frame.displayHeight;
   }
-
-  // Read all properties BEFORE close
-  const numberOfFrames = audioData.numberOfFrames;
-  const sampleRate = audioData.sampleRate;
-  const timestamp = audioData.timestamp;
-
-  const buffer = new AudioBuffer({
-    length: numberOfFrames,
-    numberOfChannels: 1,
-    sampleRate,
-  });
-
-  const samples = new Float32Array(numberOfFrames);
-  audioData.copyTo(samples, { planeIndex: 0, format: "f32-planar" });
-  buffer.copyToChannel(samples, 0);
-  audioData.close();
-
-  // First frame: use LOC timestamp for lip sync positioning
-  if (nextAudioPlayTime === null) {
-    const captureTimeSec = timestamp / 1_000_000;
-    nextAudioPlayTime = playBase! + captureTimeSec;
-  }
-
-  // If fallen behind, reset
-  if (nextAudioPlayTime < audioCtx.currentTime) {
-    nextAudioPlayTime = audioCtx.currentTime + BUFFER_SEC;
-  }
-
-  const source = audioCtx.createBufferSource();
-  source.buffer = buffer;
-  source.connect(audioCtx.destination);
-  source.start(nextAudioPlayTime);
-  nextAudioPlayTime += buffer.duration;
+  ctx.drawImage(frame, 0, 0);
+  frame.close();
 }
 
 // --- Main ---
@@ -127,9 +126,6 @@ async function start() {
 
   canvas = $("canvas") as HTMLCanvasElement;
   ctx = canvas.getContext("2d")!;
-
-  // Create AudioContext in click handler scope to satisfy autoplay policy
-  audioCtx = new AudioContext({ sampleRate: 48000 });
 
   log("Connecting...");
   session = await MoqtSession.connect(url);
@@ -169,21 +165,10 @@ async function start() {
 
   log(`Found video: ${videoTrack.name} (codec=${videoTrack.codec})`);
 
-  // Step 4: Find audio track
-  const audioTrack = catalog.tracks.find(
-    (t) => t.packaging === "loc" && t.role === "audio"
-  );
-
-  if (audioTrack) {
-    log(`Found audio: ${audioTrack.name} (codec=${audioTrack.codec})`);
-  } else {
-    log("No audio track in catalog (video-only mode).");
-  }
-
-  // Step 5: Set up video decoder (frames are scheduled via setTimeout for sync)
+  // Step 4: Set up video decoder
   videoDecoder = new VideoDecoder({
     output: (frame) => {
-      scheduleVideoFrame(frame);
+      drawFrame(frame);
     },
     error: (e) => log(`Video decoder error: ${e.message}`),
   });
@@ -192,85 +177,22 @@ async function start() {
   videoDecoder.configure({ codec: videoCodec });
   log(`Video decoder configured: ${videoCodec}`);
 
-  // Step 6: Set up audio decoder with AudioContext playback
-  if (audioTrack) {
-    audioDecoder = new AudioDecoder({
-      output: (audioData) => {
-        playAudioData(audioData);
-      },
-      error: (e) => log(`Audio decoder error: ${e.message}`),
-    });
-
-    const audioCodec = audioTrack.codec || "opus";
-    const sampleRate = audioTrack.sampleRate || 48000;
-    const numberOfChannels = audioTrack.channelCount || 1;
-    audioDecoder.configure({
-      codec: audioCodec,
-      sampleRate,
-      numberOfChannels,
-    });
-    log(`Audio decoder configured: ${audioCodec} ${sampleRate}Hz ${numberOfChannels}ch`);
-  }
-
-  // Step 7: Subscribe to video track
+  // Step 5: Subscribe to video track
   log(`Subscribing to ${videoTrack.name}...`);
   const videoSub = await session.subscribe(namespace, videoTrack.name);
   log(`Video subscribed (alias=${videoSub.trackAlias}).`);
 
-  // Step 8: Subscribe to audio track
-  let audioAlias: number | null = null;
-  if (audioTrack) {
-    log(`Subscribing to ${audioTrack.name}...`);
-    const audioSub = await session.subscribe(namespace, audioTrack.name);
-    audioAlias = audioSub.trackAlias;
-    log(`Audio subscribed (alias=${audioAlias}).`);
-  }
-
   ($("start-btn") as HTMLButtonElement).disabled = true;
   ($("stop-btn") as HTMLButtonElement).disabled = false;
 
-  // Step 9: Receive media
-  receiveLoop(videoSub.trackAlias, audioAlias);
-}
-
-// --- Video scheduling ---
-
-function scheduleVideoFrame(frame: VideoFrame) {
-  if (!audioCtx || playBase === null) {
-    // Sync not initialized yet — draw immediately
-    drawFrame(frame);
-    return;
-  }
-
-  // frame.timestamp is the normalized CaptureTimestamp (μs)
-  const captureTimeSec = frame.timestamp / 1_000_000;
-  const playTime = playBase + captureTimeSec;
-  const delayMs = (playTime - audioCtx.currentTime) * 1000;
-
-  if (delayMs <= 0) {
-    // Already due or late — draw immediately
-    drawFrame(frame);
-  } else {
-    // Schedule drawing in the future
-    setTimeout(() => drawFrame(frame), delayMs);
-  }
-}
-
-function drawFrame(frame: VideoFrame) {
-  if (
-    canvas.width !== frame.displayWidth ||
-    canvas.height !== frame.displayHeight
-  ) {
-    canvas.width = frame.displayWidth;
-    canvas.height = frame.displayHeight;
-  }
-  ctx.drawImage(frame, 0, 0);
-  frame.close();
+  // Step 6: Start playback loop and receive media
+  startPlaybackLoop();
+  receiveLoop(videoSub.trackAlias);
 }
 
 // --- Receive loop ---
 
-async function receiveLoop(videoAlias: number, audioAlias: number | null) {
+async function receiveLoop(videoAlias: number) {
   if (!session) return;
 
   try {
@@ -278,14 +200,10 @@ async function receiveLoop(videoAlias: number, audioAlias: number | null) {
       const event = await session.nextEvent();
       if (event.type !== "dataStream") continue;
 
-      const alias = event.reader.trackAlias;
-
-      if (alias === videoAlias) {
+      if (event.reader.trackAlias === videoAlias) {
+        log(`Video group ${event.reader.groupId} received`);
         processVideoGroup(event.reader);
-      } else if (audioAlias !== null && alias === audioAlias) {
-        processAudioGroup(event.reader);
       }
-      // else: skip unknown streams (e.g. catalog updates)
     }
   } catch (e) {
     log(`Receive ended: ${e}`);
@@ -300,71 +218,42 @@ async function processVideoGroup(group: SubgroupReader) {
       const result = await group.readObject();
       if (result === null) break;
 
-      if (videoDecoder && videoDecoder.state === "configured") {
-        const type = isFirstObject ? "key" : "delta";
-        isFirstObject = false;
+      const type = isFirstObject ? "key" : "delta";
+      isFirstObject = false;
 
-        const rawTimestamp = extractTimestamp(result.properties) ?? performance.now() * 1000;
-        initSyncBase(rawTimestamp);
-        const timestamp = rawTimestamp - captureTimeBase!;
-
-        const chunk = new EncodedVideoChunk({
-          type,
-          timestamp,
-          data: result.payload,
-        });
-
-        videoDecoder.decode(chunk);
+      const timestamp = extractTimestamp(result.properties);
+      if (timestamp === null) {
+        log("WARNING: missing CaptureTimestamp, skipping frame");
+        continue;
       }
+
+      // Insert in timestamp order (binary search for position)
+      const entry: QueuedFrame = { type, timestamp, data: result.payload };
+      let lo = 0;
+      let hi = frameQueue.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (frameQueue[mid].timestamp < timestamp) lo = mid + 1;
+        else hi = mid;
+      }
+      frameQueue.splice(lo, 0, entry);
     }
   } catch (e) {
     log(`Video group error: ${e}`);
   }
 }
 
-async function processAudioGroup(group: SubgroupReader) {
-  try {
-    while (true) {
-      const result = await group.readObject();
-      if (result === null) break;
-
-      if (audioDecoder && audioDecoder.state === "configured") {
-        const rawTimestamp = extractTimestamp(result.properties) ?? performance.now() * 1000;
-        initSyncBase(rawTimestamp);
-        const timestamp = rawTimestamp - captureTimeBase!;
-
-        const chunk = new EncodedAudioChunk({
-          type: "key",
-          timestamp,
-          data: result.payload,
-        });
-
-        audioDecoder.decode(chunk);
-      }
-    }
-  } catch (e) {
-    log(`Audio group error: ${e}`);
-  }
-}
-
 async function stop() {
+  playbackRunning = false;
+  frameQueue.length = 0;
+
   if (videoDecoder) {
     await videoDecoder.flush();
     videoDecoder.close();
     videoDecoder = null;
   }
-  if (audioDecoder) {
-    await audioDecoder.flush();
-    audioDecoder.close();
-    audioDecoder = null;
-  }
-  if (audioCtx) {
-    await audioCtx.close();
-    audioCtx = null;
-  }
-  captureTimeBase = null;
-  playBase = null;
-  nextAudioPlayTime = null;
+  firstTimestamp = null;
+  startTime = null;
 
   if (session) {
     session.close();

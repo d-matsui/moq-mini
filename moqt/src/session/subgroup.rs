@@ -19,27 +19,58 @@ use crate::wire::subgroup_header::SubgroupHeader;
 ///
 /// Hides `ObjectHeader` construction — callers pass only the payload.
 /// The stream is automatically finished (FIN sent) when dropped.
+///
+/// Use `write_object` for subgroups without properties,
+/// and `write_object_with_properties` for subgroups with properties.
+/// Calling the wrong method for the subgroup's `has_properties` flag
+/// will return an error.
 pub struct SubgroupWriter {
     writer: DataStreamWriter,
+    has_properties: bool,
     finished: bool,
 }
 
 impl SubgroupWriter {
-    pub(crate) fn new(writer: DataStreamWriter) -> Self {
+    pub(crate) fn new(writer: DataStreamWriter, has_properties: bool) -> Self {
         Self {
             writer,
+            has_properties,
             finished: false,
         }
     }
 
-    /// Write an object payload to this subgroup.
-    /// `ObjectHeader` is generated internally (object_id_delta=0, payload_length from payload).
+    /// Write an object payload to this subgroup (no Object Properties).
+    /// Returns an error if the subgroup was opened with `has_properties: true`.
     pub async fn write_object(&mut self, payload: &[u8]) -> Result<()> {
+        anyhow::ensure!(
+            !self.has_properties,
+            "subgroup has properties enabled; use write_object_with_properties"
+        );
         let header = ObjectHeader {
             object_id_delta: 0,
             payload_length: payload.len() as u64,
         };
         self.writer.write_object(&header, payload).await
+    }
+
+    /// Write an object with Object Properties (e.g. LOC Header Extensions).
+    /// Returns an error if the subgroup was opened with `has_properties: false`.
+    pub async fn write_object_with_properties(
+        &mut self,
+        payload: &[u8],
+        properties: &[u8],
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.has_properties,
+            "subgroup has no properties; use write_object"
+        );
+        let header = ObjectHeader {
+            object_id_delta: 0,
+            payload_length: payload.len() as u64,
+        };
+        self.writer
+            .write_object_with_properties(&header, payload, properties)
+            .await
     }
 
     /// Explicitly finish the stream (send FIN).
