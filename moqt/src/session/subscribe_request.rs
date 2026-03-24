@@ -67,4 +67,9 @@ impl SubscribeRequest {
     pub async fn forward_publish_done(&mut self, done: &PublishDoneMessage) -> Result<()> {
         self.writer.write_publish_done(done).await
     }
+
+    /// Close the request stream (send FIN on the write side).
+    pub async fn close(&mut self) -> Result<()> {
+        self.writer.finish().await
+    }
 }

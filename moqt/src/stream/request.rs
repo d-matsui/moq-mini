@@ -151,6 +151,12 @@ impl RequestStreamWriter {
         self.stream.write_all(data).await?;
         Ok(())
     }
+
+    /// Close the write side of the request stream (send FIN).
+    pub async fn finish(&mut self) -> Result<()> {
+        self.stream.finish()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

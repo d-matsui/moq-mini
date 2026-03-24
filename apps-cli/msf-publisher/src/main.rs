@@ -103,12 +103,17 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mut video_request = video_request.expect("video request must be set");
+    let mut catalog_request = catalog_request.expect("catalog request must be set");
 
     let stream_count = cli_lib::ivf::publish_from_stdin(&session, 2).await?;
 
     video_request.send_publish_done(stream_count).await?;
+    info!(stream_count, "sent PUBLISH_DONE for video");
+
+    catalog_request.send_publish_done(1).await?;
+    info!("sent PUBLISH_DONE for catalog");
+
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    info!(stream_count, "sent PUBLISH_DONE for video, exiting");
 
     Ok(())
 }
