@@ -60,23 +60,38 @@ let openStreams = 0;
 /** A writable subgroup (data stream). */
 export class SubgroupWriter {
   private writer: WritableStreamDefaultWriter<Uint8Array>;
+  private hasProperties: boolean;
 
-  constructor(writer: WritableStreamDefaultWriter<Uint8Array>) {
+  constructor(writer: WritableStreamDefaultWriter<Uint8Array>, hasProperties: boolean) {
     this.writer = writer;
+    this.hasProperties = hasProperties;
     openStreams++;
     console.log(`[stream] opened (${openStreams} open)`);
   }
 
   /** Write an object payload. ObjectHeader is generated internally. */
-  async writeObject(payload: Uint8Array): Promise<void> {
+  async writeObject(payload: Uint8Array, properties?: Uint8Array): Promise<void> {
     const header = encodeObjectHeader({
       objectIdDelta: 0,
       payloadLength: payload.length,
     });
-    const buf = new Uint8Array(header.length + payload.length);
-    buf.set(header, 0);
-    buf.set(payload, header.length);
-    await this.writer.write(buf);
+
+    if (this.hasProperties) {
+      const propsData = properties ?? new Uint8Array(0);
+      const propsLen = encodeVarint(propsData.length);
+      const buf = new Uint8Array(header.length + propsLen.length + propsData.length + payload.length);
+      let offset = 0;
+      buf.set(header, offset); offset += header.length;
+      buf.set(propsLen, offset); offset += propsLen.length;
+      buf.set(propsData, offset); offset += propsData.length;
+      buf.set(payload, offset);
+      await this.writer.write(buf);
+    } else {
+      const buf = new Uint8Array(header.length + payload.length);
+      buf.set(header, 0);
+      buf.set(payload, header.length);
+      await this.writer.write(buf);
+    }
   }
 
   /** Finish the stream (send FIN). */
@@ -110,16 +125,30 @@ export class SubgroupReader {
     await this.reader.cancel();
   }
 
-  /** Read the next object payload. Returns null on stream end. */
-  async readObject(): Promise<Uint8Array | null> {
+  /** Read the next object. Returns null on stream end.
+   *  If the subgroup has properties, returns { payload, properties }.
+   *  Otherwise returns { payload, properties: null }.
+   */
+  async readObject(): Promise<{ payload: Uint8Array; properties: Uint8Array | null } | null> {
     const result = await this.reader.tryReadVarint();
     if (result === null) return null;
 
-    const [objectIdDelta, _deltaBytes] = result;
+    const [_objectIdDelta, _deltaBytes] = result;
     const [payloadLength, _lenBytes] = await this.reader.readVarint();
 
-    if (payloadLength === 0) return new Uint8Array(0);
-    return await this.reader.readExact(payloadLength);
+    let properties: Uint8Array | null = null;
+    if (this.header.hasProperties) {
+      const [propsLen, _propsLenBytes] = await this.reader.readVarint();
+      if (propsLen > 0) {
+        properties = await this.reader.readExact(propsLen);
+      }
+    }
+
+    const payload = payloadLength === 0
+      ? new Uint8Array(0)
+      : await this.reader.readExact(payloadLength);
+
+    return { payload, properties };
   }
 }
 
@@ -401,7 +430,8 @@ export class MoqtSession {
   async openSubgroup(
     trackAlias: number,
     groupId: number,
-    subgroupId: number
+    subgroupId: number,
+    hasProperties = false,
   ): Promise<SubgroupWriter> {
     const stream = await this.transport.createUnidirectionalStream();
     const writer = stream.getWriter();
@@ -409,14 +439,14 @@ export class MoqtSession {
     const header = encodeSubgroupHeader({
       trackAlias,
       groupId,
-      hasProperties: false,
+      hasProperties,
       endOfGroup: true,
       subgroupId,
       publisherPriority: null,
     });
     await writer.write(header);
 
-    return new SubgroupWriter(writer);
+    return new SubgroupWriter(writer, hasProperties);
   }
 
   /** Close the session. */

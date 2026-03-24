@@ -1,25 +1,45 @@
 // MSF Browser Publisher
-// Captures video via getUserMedia, encodes with WebCodecs H.264,
-// publishes a catalog track, then streams video as MOQT objects
-// with LOC Header Extensions (Video Config).
+// Captures video and audio via getUserMedia, encodes with WebCodecs
+// (H.264 for video, Opus for audio), publishes a catalog track,
+// then streams media as MOQT objects.
 
 import { MoqtSession, SubgroupWriter } from "./session.js";
+import { encodeExtensions, type LocExtension } from "./loc.js";
 
 const $ = (id: string) => document.getElementById(id)!;
 
 const CATALOG_TRACK_NAME = "catalog";
 const VIDEO_TRACK_NAME = "video";
+const AUDIO_TRACK_NAME = "audio";
 const KEYFRAME_INTERVAL = 60; // ~2s at 30fps
+const AUDIO_GROUP_FRAMES = 25; // New audio group every ~25 Opus frames (~500ms at 20ms/frame)
 
 let session: MoqtSession | null = null;
-let encoder: VideoEncoder | null = null;
-let currentGroup: SubgroupWriter | null = null;
-let groupId = 0;
-let streamCount = 0;
-let groupStarted = false;
+let videoEncoder: VideoEncoder | null = null;
+let audioEncoder: AudioEncoder | null = null;
+let currentVideoGroup: SubgroupWriter | null = null;
+let currentAudioGroup: SubgroupWriter | null = null;
+let videoGroupId = 0;
+let audioGroupId = 0;
+let videoStreamCount = 0;
+let audioStreamCount = 0;
+let videoGroupStarted = false;
 let frameCount = 0;
+let audioFrameCount = 0;
 let mediaStream: MediaStream | null = null;
 let pendingVideoConfig: Uint8Array | null = null;
+let videoTrackAlias = 0;
+let audioTrackAlias = 0;
+let videoWriteQueue: Promise<void> = Promise.resolve();
+let audioWriteQueue: Promise<void> = Promise.resolve();
+
+// --- LOC helpers ---
+
+/** Encode a CaptureTimestamp LOC extension as Object Properties bytes. */
+function makeCaptureTimestamp(timestampUs: number): Uint8Array {
+  const ext: LocExtension = { type: "captureTimestamp", value: timestampUs };
+  return encodeExtensions([ext]);
+}
 
 // --- Catalog ---
 
@@ -38,6 +58,8 @@ interface MsfTrack {
   height?: number;
   framerate?: number;
   bitrate?: number;
+  sampleRate?: number;
+  channelCount?: number;
 }
 
 async function publishCatalog(
@@ -83,16 +105,27 @@ async function start() {
         framerate: 30,
         bitrate: 1_000_000,
       },
+      {
+        name: AUDIO_TRACK_NAME,
+        packaging: "loc",
+        isLive: true,
+        role: "audio",
+        codec: "opus",
+        sampleRate: 48000,
+        channelCount: 1,
+        bitrate: 64_000,
+      },
     ],
   };
 
-  // Wait for SUBSCRIBEs (catalog and video)
+  // Wait for SUBSCRIBEs (catalog, video, audio)
   log("Waiting for SUBSCRIBEs...");
 
   let catalogDone = false;
   let videoDone = false;
+  let audioDone = false;
 
-  while (!catalogDone || !videoDone) {
+  while (!catalogDone || !videoDone || !audioDone) {
     const event = await session.nextEvent();
     if (event.type !== "subscribe") continue;
 
@@ -104,19 +137,24 @@ async function start() {
       await publishCatalog(session, 1, catalog);
       catalogDone = true;
     } else if (trackName === VIDEO_TRACK_NAME) {
-      await event.request.accept(2); // video alias = 2
+      videoTrackAlias = 2;
+      await event.request.accept(videoTrackAlias);
       videoDone = true;
+    } else if (trackName === AUDIO_TRACK_NAME) {
+      audioTrackAlias = 3;
+      await event.request.accept(audioTrackAlias);
+      audioDone = true;
     } else {
       log(`Unknown track: ${trackName}, ignoring`);
     }
   }
 
-  log("Both SUBSCRIBEs received. Starting capture...");
+  log("All SUBSCRIBEs received. Starting capture...");
 
   // Start capture
   mediaStream = await navigator.mediaDevices.getUserMedia({
     video: { width: 640, height: 480, frameRate: 30 },
-    audio: false,
+    audio: { sampleRate: 48000, channelCount: 1 },
   });
 
   const videoTrack = mediaStream.getVideoTracks()[0];
@@ -125,14 +163,16 @@ async function start() {
   preview.srcObject = mediaStream;
 
   // Set up WebCodecs VideoEncoder (H.264)
-  encoder = new VideoEncoder({
-    output: async (chunk, metadata) => {
-      await handleEncodedChunk(chunk, metadata ?? undefined);
+  videoEncoder = new VideoEncoder({
+    output: (chunk, metadata) => {
+      videoWriteQueue = videoWriteQueue.then(() =>
+        handleEncodedVideoChunk(chunk, metadata ?? undefined)
+      );
     },
-    error: (e) => log(`Encoder error: ${e.message}`),
+    error: (e) => log(`Video encoder error: ${e.message}`),
   });
 
-  encoder.configure({
+  videoEncoder.configure({
     codec: "avc1.42001e", // H.264 Baseline Level 3.0
     width: settings.width || 640,
     height: settings.height || 480,
@@ -143,33 +183,76 @@ async function start() {
   });
 
   // Read frames from video track
-  const processor = new MediaStreamTrackProcessor({ track: videoTrack });
-  const frameReader = processor.readable.getReader();
+  const videoProcessor = new MediaStreamTrackProcessor({ track: videoTrack });
+  const frameReader = videoProcessor.readable.getReader();
+  readVideoFrames(frameReader);
 
-  readFrames(frameReader);
+  // Set up WebCodecs AudioEncoder (Opus)
+  const audioTrack = mediaStream.getAudioTracks()[0];
+  if (audioTrack) {
+    audioEncoder = new AudioEncoder({
+      output: (chunk) => {
+        audioWriteQueue = audioWriteQueue.then(() =>
+          handleEncodedAudioChunk(chunk)
+        );
+      },
+      error: (e) => log(`Audio encoder error: ${e.message}`),
+    });
+
+    audioEncoder.configure({
+      codec: "opus",
+      sampleRate: 48000,
+      numberOfChannels: 1,
+      bitrate: 64_000,
+    });
+
+    const audioProcessor = new MediaStreamTrackProcessor({ track: audioTrack });
+    const audioReader = audioProcessor.readable.getReader();
+    readAudioFrames(audioReader);
+
+    log("Audio encoder started.");
+  } else {
+    log("No audio track available.");
+  }
+
   ($("start-btn") as HTMLButtonElement).disabled = true;
   ($("stop-btn") as HTMLButtonElement).disabled = false;
   log("Publishing...");
 }
 
-async function readFrames(
+async function readVideoFrames(
   reader: ReadableStreamDefaultReader<VideoFrame>
 ) {
   while (true) {
     const { value: frame, done } = await reader.read();
-    if (done || !encoder) break;
-    if (encoder.encodeQueueSize > 3) {
+    if (done || !videoEncoder) break;
+    if (videoEncoder.encodeQueueSize > 3) {
       frame.close();
       continue;
     }
     const requestKeyframe = frameCount % KEYFRAME_INTERVAL === 0;
-    encoder.encode(frame, { keyFrame: requestKeyframe });
+    videoEncoder.encode(frame, { keyFrame: requestKeyframe });
     frameCount++;
     frame.close();
   }
 }
 
-async function handleEncodedChunk(
+async function readAudioFrames(
+  reader: ReadableStreamDefaultReader<AudioData>
+) {
+  while (true) {
+    const { value: data, done } = await reader.read();
+    if (done || !audioEncoder) break;
+    if (audioEncoder.encodeQueueSize > 10) {
+      data.close();
+      continue;
+    }
+    audioEncoder.encode(data);
+    data.close();
+  }
+}
+
+async function handleEncodedVideoChunk(
   chunk: EncodedVideoChunk,
   metadata?: EncodedVideoChunkMetadata
 ) {
@@ -187,36 +270,72 @@ async function handleEncodedChunk(
   }
 
   // Keyframe starts a new group
-  if (chunk.type === "key" && groupStarted) {
-    if (currentGroup) {
-      currentGroup.finish().catch(() => {});
-      streamCount++;
+  if (chunk.type === "key" && videoGroupStarted) {
+    if (currentVideoGroup) {
+      currentVideoGroup.finish().catch(() => {});
+      videoStreamCount++;
     }
-    groupId++;
+    videoGroupId++;
   }
 
   // Open new subgroup if needed
-  if (!currentGroup || (chunk.type === "key" && groupStarted)) {
-    currentGroup = await session.openSubgroup(2, groupId, 0);
-    groupStarted = true;
+  if (!currentVideoGroup || (chunk.type === "key" && videoGroupStarted)) {
+    currentVideoGroup = await session.openSubgroup(videoTrackAlias, videoGroupId, 0, true);
+    videoGroupStarted = true;
   }
 
-  // Write frame as one MOQT object
+  // Write frame as one MOQT object with CaptureTimestamp
   const data = new Uint8Array(chunk.byteLength);
   chunk.copyTo(data);
-  await currentGroup.writeObject(data);
+  const props = makeCaptureTimestamp(chunk.timestamp);
+  await currentVideoGroup.writeObject(data, props);
+}
+
+async function handleEncodedAudioChunk(chunk: EncodedAudioChunk) {
+  if (!session) return;
+
+  // Start new group every AUDIO_GROUP_FRAMES frames
+  if (currentAudioGroup && audioFrameCount >= AUDIO_GROUP_FRAMES) {
+    await currentAudioGroup.finish();
+    audioStreamCount++;
+    audioGroupId++;
+    currentAudioGroup = null;
+    audioFrameCount = 0;
+  }
+
+  // Open new subgroup if needed
+  if (!currentAudioGroup) {
+    currentAudioGroup = await session.openSubgroup(audioTrackAlias, audioGroupId, 0, true);
+  }
+
+  const data = new Uint8Array(chunk.byteLength);
+  chunk.copyTo(data);
+  const props = makeCaptureTimestamp(chunk.timestamp);
+  await currentAudioGroup.writeObject(data, props);
+  audioFrameCount++;
 }
 
 async function stop() {
-  if (encoder) {
-    await encoder.flush();
-    encoder.close();
-    encoder = null;
+  if (videoEncoder) {
+    await videoEncoder.flush();
+    videoEncoder.close();
+    videoEncoder = null;
   }
 
-  if (currentGroup) {
-    await currentGroup.finish();
-    streamCount++;
+  if (audioEncoder) {
+    await audioEncoder.flush();
+    audioEncoder.close();
+    audioEncoder = null;
+  }
+
+  if (currentVideoGroup) {
+    await currentVideoGroup.finish();
+    videoStreamCount++;
+  }
+
+  if (currentAudioGroup) {
+    await currentAudioGroup.finish();
+    audioStreamCount++;
   }
 
   if (mediaStream) {
@@ -231,7 +350,7 @@ async function stop() {
 
   ($("start-btn") as HTMLButtonElement).disabled = false;
   ($("stop-btn") as HTMLButtonElement).disabled = true;
-  log(`Stopped. Sent ${streamCount} groups.`);
+  log(`Stopped. Sent ${videoStreamCount} video groups, ${audioStreamCount} audio groups.`);
 }
 
 function log(msg: string) {
