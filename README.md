@@ -59,7 +59,7 @@ cargo build
 Start the relay, Vite dev server, and open the browser client:
 
 ```bash
-./scripts/dev.sh
+./scripts/e2e-web-demo.sh
 ```
 
 This will:
@@ -73,7 +73,7 @@ This will:
 Stream a test video pattern through the full pipeline:
 
 ```bash
-./scripts/e2e-video-test.sh
+./scripts/e2e-cli-ivf.sh
 ```
 
 This runs: ffmpeg (VP8 test source) → ivf-publisher → relay → ivf-subscriber → ffplay
@@ -122,7 +122,7 @@ cargo test                                       # All Rust tests
 cargo test -p moqt                               # Core library only
 cargo test -p relay --test integration            # Integration tests
 cd apps-web && npm test                           # TypeScript tests
-./scripts/e2e-video-test.sh                      # E2E video pipeline
+./scripts/e2e-cli-ivf.sh                      # E2E video pipeline
 ```
 
 ## Design
