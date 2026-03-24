@@ -17,7 +17,7 @@
 //! | 13 | Video Config        | bytes (odd)   |
 
 use anyhow::{Result, bail, ensure};
-use moqt_core::wire::varint::{decode_varint, encode_varint};
+use moqt::wire::varint::{decode_varint, encode_varint};
 
 /// Extension ID for Capture Timestamp (Section 2.3.1.1).
 pub const EXT_CAPTURE_TIMESTAMP: u64 = 2;

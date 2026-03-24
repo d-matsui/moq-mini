@@ -5,11 +5,11 @@
 ## プロジェクト構成
 
 ```
-moqt-core/          # MOQT プロトコルの共通ロジック（ライブラリ）
-moqt-relay/          # Relay バイナリ
-moqt-pub/            # Publisher バイナリ（テスト/デモ用）
-moqt-sub/            # Subscriber バイナリ（テスト/デモ用）
-web/                 # ブラウザクライアント（TypeScript + WebTransport）
+moqt/          # MOQT プロトコルの共通ロジック（ライブラリ）
+relay/          # Relay バイナリ
+apps-cli/pub/            # Publisher バイナリ（テスト/デモ用）
+apps-cli/sub/            # Subscriber バイナリ（テスト/デモ用）
+apps-web/                 # ブラウザクライアント（TypeScript + WebTransport）
 scripts/             # 開発・テスト用スクリプト（dev.sh, e2e-video-test.sh）
 ```
 
@@ -105,14 +105,14 @@ Publisher              Relay                Subscriber
 | SUBSCRIBE リクエスト | Bidirectional | Subscriber | SUBSCRIBE → SUBSCRIBE_OK/REQUEST_ERROR → PUBLISH_DONE |
 | Object 送信 | Unidirectional | Publisher | SUBGROUP_HEADER + Objects、Subgroup ごとに新しい stream |
 
-## web/（ブラウザクライアント）
+## apps-web/（ブラウザクライアント）
 
 TypeScript で実装されたブラウザ向け MOQT クライアント。WebTransport API を使用して Relay に接続する。
 
 ### 構成
 
 ```
-web/src/
+apps-apps-web/src/
 ├── wire/           # ワイヤフォーマットの encode/decode（Rust の wire/ と同等）
 │   ├── varint.ts, message.ts, parameter.ts, setup.ts, subscribe.ts,
 │   │   subscribe_ok.ts, publish_namespace.ts, request_ok.ts, publish_done.ts,
@@ -127,9 +127,9 @@ web/src/
 
 ### HTML ページ
 
-- `web/index.html` — ランディングページ（Publisher/Subscriber へのリンク）
-- `web/publisher.html` — カメラキャプチャ → MOQT 配信
-- `web/subscriber.html` — MOQT 映像受信 → 再生
+- `apps-web/index.html` — ランディングページ（Publisher/Subscriber へのリンク）
+- `apps-web/publisher.html` — カメラキャプチャ → MOQT 配信
+- `apps-web/subscriber.html` — MOQT 映像受信 → 再生
 
 ### 開発
 
@@ -145,27 +145,27 @@ cd web && npm run dev   # Vite のみ起動
 各ソースファイル内に `#[cfg(test)] mod tests` として記述。
 
 ```
-moqt-core/src/wire/varint.rs          → vi64 のテスト
-moqt-core/src/wire/track_namespace.rs → Track Namespace のテスト
-moqt-core/src/wire/reason_phrase.rs   → Reason Phrase のテスト
-moqt-core/src/wire/key_value_pair.rs  → Key-Value-Pair のテスト
-moqt-core/src/wire/setup.rs           → SETUP のテスト
-moqt-core/src/wire/subscribe.rs       → SUBSCRIBE のテスト
-moqt-core/src/wire/subscribe_ok.rs    → SUBSCRIBE_OK のテスト
-moqt-core/src/wire/publish_namespace.rs → PUBLISH_NAMESPACE のテスト
-moqt-core/src/wire/request_ok.rs      → REQUEST_OK のテスト
-moqt-core/src/wire/request_error.rs   → REQUEST_ERROR のテスト
-moqt-core/src/wire/publish_done.rs    → PUBLISH_DONE のテスト
-moqt-core/src/wire/subgroup_header.rs → SUBGROUP_HEADER のテスト
-moqt-core/src/wire/object.rs          → Object fields のテスト
+moqt/src/wire/varint.rs          → vi64 のテスト
+moqt/src/wire/track_namespace.rs → Track Namespace のテスト
+moqt/src/wire/reason_phrase.rs   → Reason Phrase のテスト
+moqt/src/wire/key_value_pair.rs  → Key-Value-Pair のテスト
+moqt/src/wire/setup.rs           → SETUP のテスト
+moqt/src/wire/subscribe.rs       → SUBSCRIBE のテスト
+moqt/src/wire/subscribe_ok.rs    → SUBSCRIBE_OK のテスト
+moqt/src/wire/publish_namespace.rs → PUBLISH_NAMESPACE のテスト
+moqt/src/wire/request_ok.rs      → REQUEST_OK のテスト
+moqt/src/wire/request_error.rs   → REQUEST_ERROR のテスト
+moqt/src/wire/publish_done.rs    → PUBLISH_DONE のテスト
+moqt/src/wire/subgroup_header.rs → SUBGROUP_HEADER のテスト
+moqt/src/wire/object.rs          → Object fields のテスト
 ```
 
 ### 単体テスト: TypeScript（vitest）
 
 ```
-web/src/wire/varint.test.ts   → varint encode/decode テスト
-web/src/wire/message.test.ts  → メッセージ encode/decode テスト
-web/src/wire/wire.test.ts     → ワイヤフォーマット統合テスト
+apps-apps-web/src/wire/varint.test.ts   → varint encode/decode テスト
+apps-apps-web/src/wire/message.test.ts  → メッセージ encode/decode テスト
+apps-apps-web/src/wire/wire.test.ts     → ワイヤフォーマット統合テスト
 ```
 
 ### 結合テスト
@@ -174,7 +174,7 @@ web/src/wire/wire.test.ts     → ワイヤフォーマット統合テスト
 Publisher / Relay / Subscriber を同一プロセス内で起動し、localhost で接続する。
 
 ```
-moqt-relay/tests/integration.rs  → raw QUIC + WebTransport + cross-transport テスト
+relay/tests/integration.rs  → raw QUIC + WebTransport + cross-transport テスト
 ```
 
 ### E2E テスト

@@ -9,12 +9,13 @@ echo "=== Building... ==="
 cargo build 2>&1 | tail -1
 
 # Clean up from previous runs
-pkill -f "target/debug/moqt-relay" 2>/dev/null || true
-pkill -f "target/debug/msf-" 2>/dev/null || true
+pkill -f "target/debug/relay" 2>/dev/null || true
+pkill -f "target/debug/msf-pub" 2>/dev/null || true
+pkill -f "target/debug/msf-sub" 2>/dev/null || true
 sleep 0.5
 
 echo "=== Starting Relay ==="
-RUST_LOG=info ./target/debug/moqt-relay 2>&1 &
+RUST_LOG=info ./target/debug/relay 2>&1 &
 RELAY_PID=$!
 sleep 1
 

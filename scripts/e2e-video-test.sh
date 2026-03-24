@@ -8,11 +8,13 @@ echo "=== Building... ==="
 cargo build 2>&1 | tail -1
 
 # Clean up from previous runs
-pkill -f "target/debug/moqt-" 2>/dev/null || true
+pkill -f "target/debug/relay" 2>/dev/null || true
+pkill -f "target/debug/pub" 2>/dev/null || true
+pkill -f "target/debug/sub" 2>/dev/null || true
 sleep 0.5
 
 echo "=== Starting Relay ==="
-./target/debug/moqt-relay 2>&1 &
+./target/debug/relay 2>&1 &
 RELAY_PID=$!
 sleep 1
 
@@ -24,12 +26,12 @@ fi
 echo "=== Starting Publisher (ffmpeg VP8 testsrc 10s) ==="
 ffmpeg -re -f lavfi -i testsrc=duration=10:size=320x240:rate=30 \
     -c:v libvpx -g 30 -f ivf pipe:1 2>/dev/null \
-    | ./target/debug/moqt-pub 127.0.0.1:4433  &
+    | ./target/debug/pub 127.0.0.1:4433  &
 PUB_PID=$!
 sleep 2
 
 echo "=== Starting Subscriber (piping to ffplay) ==="
-./target/debug/moqt-sub 127.0.0.1:4433  \
+./target/debug/sub 127.0.0.1:4433  \
     | ffplay -f ivf -autoexit - 2>/dev/null
 
 echo "=== Done ==="

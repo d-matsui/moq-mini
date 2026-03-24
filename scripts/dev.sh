@@ -23,13 +23,13 @@ sleep 1
 
 # === Start relay ===
 echo "Starting relay..."
-cargo run --bin moqt-relay -- --cert "$CERT" --key "$KEY" &
+cargo run --bin relay -- --cert "$CERT" --key "$KEY" &
 RELAY_PID=$!
 sleep 2
 
 # === Start Vite ===
 echo "Starting Vite..."
-(cd web && npx vite --port 5173) &
+(cd apps-web && npx vite --port 5173) &
 VITE_PID=$!
 sleep 2
 

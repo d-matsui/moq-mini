@@ -15,7 +15,7 @@ session/  → プロトコルロジック + 公開 API
 ## モジュール構成
 
 ```
-moqt-core/src/
+moqt/src/
 ├── lib.rs
 ├── client.rs              # connect() ヘルパー（QUIC 接続 + SETUP 一括）
 ├── quic_config.rs         # QUIC/TLS 設定（ALPN: moqt-17 + h3）

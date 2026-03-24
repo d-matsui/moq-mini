@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "moqt-core",
-    "moqt-relay",
-    "moqt-pub",
-    "moqt-sub",
+    "moqt",
+    "relay",
     "msf",
-    "msf-pub",
-    "msf-sub",
+    "apps-cli/pub",
+    "apps-cli/sub",
+    "apps-cli/msf-pub",
+    "apps-cli/msf-sub",
 ]
 resolver = "2"
 

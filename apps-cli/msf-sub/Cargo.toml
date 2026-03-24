@@ -1,0 +1,14 @@
+[package]
+name = "msf-sub"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+moqt = { path = "../../moqt" }
+msf = { path = "../../msf" }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rustls.workspace = true
+serde_json = "1"
+tokio.workspace = true

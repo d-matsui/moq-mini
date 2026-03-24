@@ -27,11 +27,13 @@ The relay supports both **raw QUIC** (ALPN: `moqt-17`) and **WebTransport** (ALP
 ## Project Structure
 
 ```
-moqt-core/     # Shared library — wire protocol, stream I/O, session logic
-moqt-relay/    # Relay server binary
-moqt-pub/      # Publisher CLI (test/demo)
-moqt-sub/      # Subscriber CLI (test/demo)
-web/           # Browser client (TypeScript + WebTransport)
+moqt/          # Shared library — wire protocol, stream I/O, session logic
+relay/         # Relay server binary
+msf/           # MSF library (catalog, LOC)
+apps-cli/      # CLI clients (pub, sub, msf-pub, msf-sub)
+apps-web/      # Browser client (TypeScript + WebTransport)
+  src/lib/     #   MoQT library (wire, session, stream, loc)
+  src/app/     #   Apps (publisher, subscriber, msf-*)
 scripts/       # Development and testing scripts
 docs/design/   # Architecture and design documents
 ```
@@ -73,40 +75,40 @@ Stream a test video pattern through the full pipeline:
 ./scripts/e2e-video-test.sh
 ```
 
-This runs: ffmpeg (VP8 test source) → moqt-pub → relay → moqt-sub → ffplay
+This runs: ffmpeg (VP8 test source) → pub → relay → sub → ffplay
 
 ## Usage
 
 ### Relay
 
 ```bash
-cargo run --bin moqt-relay -- --cert certs/localhost+2.pem --key certs/localhost+2-key.pem
+cargo run --bin relay -- --cert certs/localhost+2.pem --key certs/localhost+2-key.pem
 ```
 
 ### Publisher
 
 ```bash
 # Demo mode — sends dummy data
-cargo run --bin moqt-pub
+cargo run --bin pub
 
 # Pipe mode — publish VP8/IVF video from stdin
-ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin moqt-pub -- --pipe
+ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin pub -- --pipe
 ```
 
 ### Subscriber
 
 ```bash
 # Default — prints received objects to stderr
-cargo run --bin moqt-sub
+cargo run --bin sub
 
 # Pipe mode — outputs IVF to stdout for playback
-cargo run --bin moqt-sub -- --pipe | ffplay -f ivf -
+cargo run --bin sub -- --pipe | ffplay -f ivf -
 ```
 
 ### Web Client
 
 ```bash
-cd web
+cd apps-web
 npm install
 npm run dev     # Start dev server at http://localhost:5173
 ```
@@ -115,9 +117,9 @@ npm run dev     # Start dev server at http://localhost:5173
 
 ```bash
 cargo test                                       # All Rust tests
-cargo test -p moqt-core                          # Core library only
-cargo test -p moqt-relay --test integration      # Integration tests
-cd web && npm test                               # TypeScript tests
+cargo test -p moqt                               # Core library only
+cargo test -p relay --test integration            # Integration tests
+cd apps-web && npm test                           # TypeScript tests
 ./scripts/e2e-video-test.sh                      # E2E video pipeline
 ```
 

@@ -1,7 +1,7 @@
 # 設計: moqt-relay
 
 ```
-moqt-relay/src/
+relay/src/
 ├── main.rs    # サーバ起動、自己署名証明書生成
 └── relay.rs   # Relay 本体（状態管理 + イベントループ）
 ```

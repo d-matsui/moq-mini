@@ -1,0 +1,15 @@
+[package]
+name = "moqt"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+quinn.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+url.workspace = true
+web-transport-quinn.workspace = true
