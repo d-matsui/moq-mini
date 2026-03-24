@@ -138,6 +138,7 @@ async function start() {
     height: settings.height || 480,
     framerate: 30,
     bitrate: 1_000_000,
+    latencyMode: "realtime",
     avc: { format: "annexb" },
   });
 
