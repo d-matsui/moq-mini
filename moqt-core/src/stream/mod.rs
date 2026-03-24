@@ -98,3 +98,33 @@ pub async fn read_message_frame(stream: &mut RecvStream) -> Result<Vec<u8>> {
     result.extend_from_slice(&payload);
     Ok(result)
 }
+
+/// Read one message frame, returning `None` on stream FIN.
+///
+/// Same as `read_message_frame`, but distinguishes a clean stream end (FIN)
+/// from a real read error. Only the first byte read is checked for FIN;
+/// a FIN in the middle of a message is still an error.
+pub async fn try_read_message_frame(stream: &mut RecvStream) -> Result<Option<Vec<u8>>> {
+    // Read message type (varint), checking for FIN on first byte
+    let (_type_val, type_bytes) = match try_read_varint(stream).await? {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    // Read payload length (2-byte big-endian u16)
+    let mut len_bytes = [0u8; 2];
+    stream.read_exact(&mut len_bytes).await?;
+    let payload_len = u16::from_be_bytes(len_bytes) as usize;
+
+    // Read payload body
+    let mut payload = vec![0u8; payload_len];
+    if payload_len > 0 {
+        stream.read_exact(&mut payload).await?;
+    }
+
+    let mut result = Vec::with_capacity(type_bytes.len() + 2 + payload_len);
+    result.extend_from_slice(&type_bytes);
+    result.extend_from_slice(&len_bytes);
+    result.extend_from_slice(&payload);
+    Ok(Some(result))
+}

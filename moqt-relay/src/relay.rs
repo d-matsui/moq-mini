@@ -526,12 +526,13 @@ async fn handle_subscribe(
         .await?;
 
     // === Wait for PUBLISH_DONE and forward ===
-    let publish_done = subscription.recv_publish_done().await?;
-
-    let subs_to_notify = state.lock().await.find_subscriber_requests(&track);
-
-    for req in subs_to_notify {
-        let _ = req.lock().await.forward_publish_done(&publish_done).await;
+    if let Some(publish_done) = subscription.recv_publish_done().await? {
+        let subs_to_notify = state.lock().await.find_subscriber_requests(&track);
+        for req in subs_to_notify {
+            let _ = req.lock().await.forward_publish_done(&publish_done).await;
+        }
+    } else {
+        debug!("publisher closed without PUBLISH_DONE");
     }
 
     Ok(())

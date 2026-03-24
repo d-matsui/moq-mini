@@ -1,17 +1,16 @@
 //! # moqt-sub: MOQT Subscriber
 //!
 //! A client that connects to a relay server and receives media data.
-//! Supports two modes:
+//! Outputs received VP8 frames as an IVF container to stdout.
 //!
-//! - **Default mode**: Prints received Objects in human-readable form to stderr
-//! - **Pipe mode** (`--pipe`): Outputs received VP8 frames as an IVF container to stdout.
-//!   Can be piped to ffplay for real-time playback:
-//!   `moqt-sub --pipe | ffplay -f ivf -`
+//! ```bash
+//! cargo run --bin moqt-sub | ffplay -f ivf -
+//! ```
 //!
 //! ## Processing Flow
 //! 1. Establish a QUIC connection to the relay and exchange SETUP
 //! 2. Send SUBSCRIBE and receive SUBSCRIBE_OK
-//! 3. Receive data on unidirectional streams
+//! 3. Receive data on unidirectional streams, output as IVF
 //! 4. Terminate upon receiving PUBLISH_DONE
 
 use std::io::Write;
@@ -21,11 +20,12 @@ use moqt_core::client::{self, TlsConfig};
 use moqt_core::session::SessionEvent;
 use moqt_core::wire::parameter::{MessageParameter, SubscriptionFilter};
 use moqt_core::wire::track_namespace::TrackNamespace;
-use tracing::{debug, info};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
@@ -37,7 +37,6 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to install crypto provider");
 
     let args: Vec<String> = std::env::args().collect();
-    let pipe_mode = args.iter().any(|a| a == "--pipe");
     let relay_addr: SocketAddr = args
         .iter()
         .find(|a| !a.starts_with('-') && a.contains(':'))
@@ -79,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
     let session = std::sync::Arc::new(session);
     let session_recv = session.clone();
 
-    // Receive Object streams
+    // Receive Object streams and output as IVF
     let receive_handle = tokio::spawn(async move {
         let session = session_recv;
         let stdout = std::io::stdout();
@@ -87,64 +86,54 @@ async fn main() -> anyhow::Result<()> {
         let mut frame_index: u64 = 0;
 
         loop {
-            let mut group = match session.next_event().await {
+            let group = match session.next_event().await {
                 Ok(SessionEvent::DataStream(g)) => g,
-                Ok(_) => continue, // ignore non-data events
-                Err(_) => break,   // connection closed
+                Ok(_) => continue,
+                Err(_) => break,
             };
-            if pipe_mode {
-                // Pipe mode: write IVF container to stdout
-                // Write IVF file header once
-                if !ivf_header_written {
-                    let mut ivf_hdr = [0u8; 32];
-                    ivf_hdr[0..4].copy_from_slice(b"DKIF");
-                    ivf_hdr[4..6].copy_from_slice(&0u16.to_le_bytes());
-                    ivf_hdr[6..8].copy_from_slice(&32u16.to_le_bytes());
-                    ivf_hdr[8..12].copy_from_slice(b"VP80");
-                    ivf_hdr[12..14].copy_from_slice(&320u16.to_le_bytes());
-                    ivf_hdr[14..16].copy_from_slice(&240u16.to_le_bytes());
-                    ivf_hdr[16..20].copy_from_slice(&30u32.to_le_bytes());
-                    ivf_hdr[20..24].copy_from_slice(&1u32.to_le_bytes());
-                    let _ = stdout.lock().write_all(&ivf_hdr);
-                    ivf_header_written = true;
-                }
 
-                // Write each Object as an IVF frame
-                while let Ok(Some(payload)) = group.read_object().await {
-                    let mut out = stdout.lock();
-                    let size = payload.len() as u32;
-                    let _ = out.write_all(&size.to_le_bytes());
-                    let _ = out.write_all(&frame_index.to_le_bytes());
-                    let _ = out.write_all(&payload);
-                    let _ = out.flush();
-                    frame_index += 1;
-                }
-            } else {
-                // Demo mode: print human-readable
-                let group_id = group.group_id();
-                let alias = group.track_alias();
-                debug!(group_id, alias, "receiving group");
-                let mut object_id: u64 = 0;
-                while let Ok(Some(payload)) = group.read_object().await {
-                    debug!(
-                        group_id,
-                        object_id,
-                        bytes = payload.len(),
-                        "received object"
-                    );
-                    object_id += 1;
-                }
+            // Write IVF file header once
+            if !ivf_header_written {
+                let mut ivf_hdr = [0u8; 32];
+                ivf_hdr[0..4].copy_from_slice(b"DKIF");
+                ivf_hdr[4..6].copy_from_slice(&0u16.to_le_bytes());
+                ivf_hdr[6..8].copy_from_slice(&32u16.to_le_bytes());
+                ivf_hdr[8..12].copy_from_slice(b"VP80");
+                ivf_hdr[12..14].copy_from_slice(&320u16.to_le_bytes());
+                ivf_hdr[14..16].copy_from_slice(&240u16.to_le_bytes());
+                ivf_hdr[16..20].copy_from_slice(&30u32.to_le_bytes());
+                ivf_hdr[20..24].copy_from_slice(&1u32.to_le_bytes());
+                let _ = stdout.lock().write_all(&ivf_hdr);
+                ivf_header_written = true;
+            }
+
+            // Write each Object as an IVF frame
+            let mut group = group;
+            while let Ok(Some(payload)) = group.read_object().await {
+                let mut out = stdout.lock();
+                let size = payload.len() as u32;
+                let _ = out.write_all(&size.to_le_bytes());
+                let _ = out.write_all(&frame_index.to_le_bytes());
+                let _ = out.write_all(&payload);
+                let _ = out.flush();
+                frame_index += 1;
             }
         }
     });
 
     // Wait for PUBLISH_DONE
-    let publish_done = subscription.recv_publish_done().await?;
-    info!(
-        status = publish_done.status_code,
-        streams = publish_done.stream_count,
-        "received PUBLISH_DONE"
-    );
+    match subscription.recv_publish_done().await? {
+        Some(publish_done) => {
+            info!(
+                status = publish_done.status_code,
+                streams = publish_done.stream_count,
+                "received PUBLISH_DONE"
+            );
+        }
+        None => {
+            info!("publisher closed without PUBLISH_DONE");
+        }
+    }
 
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     session.close();

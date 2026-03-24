@@ -106,7 +106,11 @@ async fn publish_namespace_registration() {
     let pub_session = Arc::new(connect_client(addr, cert_der).await);
 
     // Send PUBLISH_NAMESPACE
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
     // If we get here, registration succeeded
 }
 
@@ -125,7 +129,11 @@ async fn subscribe_via_relay() {
 
     // Publisher connects and registers namespace
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Keep publisher connection alive for the duration of the test
     let _pub_session_keepalive = pub_session.clone();
@@ -171,7 +179,11 @@ async fn object_forwarding() {
 
     // Publisher setup
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Keep connection alive after the spawned task completes.
     let _pub_session_keepalive = pub_session.clone();
@@ -236,7 +248,11 @@ async fn publish_done_forwarding() {
 
     // Publisher setup
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Publisher: accept SUBSCRIBE, respond, send object, then PUBLISH_DONE
     let _pub_session_keepalive = pub_session.clone();
@@ -270,7 +286,7 @@ async fn publish_done_forwarding() {
         .unwrap();
 
     // Read PUBLISH_DONE (forwarded by relay)
-    let publish_done = subscription.recv_publish_done().await.unwrap();
+    let publish_done = subscription.recv_publish_done().await.unwrap().unwrap();
     assert_eq!(publish_done.status_code, 0x2); // TRACK_ENDED
     assert_eq!(publish_done.stream_count, 1);
 }
@@ -286,7 +302,11 @@ async fn multiple_groups() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Publisher: accept SUBSCRIBE, send 3 groups with 2 objects each
     let _pub_session_keepalive = pub_session.clone();
@@ -360,7 +380,7 @@ async fn multiple_groups() {
     );
 
     // Verify PUBLISH_DONE
-    let publish_done = subscription.recv_publish_done().await.unwrap();
+    let publish_done = subscription.recv_publish_done().await.unwrap().unwrap();
     assert_eq!(publish_done.stream_count, 3);
 }
 
@@ -376,7 +396,11 @@ async fn late_join() {
 
     // Publisher connects first and registers
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Publisher: accept SUBSCRIBE (will come later), respond, send objects
     let _pub_session_keepalive = pub_session.clone();
@@ -505,7 +529,11 @@ async fn multiple_subscribers() {
 
     // Publisher setup
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Publisher: accept 1 SUBSCRIBE (aggregation means only one arrives),
     // send objects, then PUBLISH_DONE.
@@ -580,7 +608,11 @@ async fn multiple_tracks() {
 
     // Publisher
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Publisher: accept 2 SUBSCRIBEs (video + audio), send objects on each
     let _pub_session_keepalive = pub_session.clone();
@@ -673,7 +705,11 @@ async fn subscription_aggregation() {
 
     // Publisher
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Publisher: accept exactly 1 SUBSCRIBE, send data, then PUBLISH_DONE
     let pub_handle = tokio::spawn(async move {
@@ -765,7 +801,11 @@ async fn subscriber_disconnect() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     // Publisher: accept SUBSCRIBE, respond, send objects continuously
     let _pub_session_keepalive = pub_session.clone();
@@ -885,7 +925,11 @@ async fn webtransport_object_forwarding() {
 
     // Publisher (WebTransport)
     let pub_session = Arc::new(connect_webtransport_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     let _pub_keepalive = pub_session.clone();
     let pub_handle = tokio::spawn(async move {
@@ -937,7 +981,11 @@ async fn cross_transport_quic_to_webtransport() {
 
     // Publisher (raw QUIC)
     let pub_session = Arc::new(connect_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     let _pub_keepalive = pub_session.clone();
     let pub_handle = tokio::spawn(async move {
@@ -986,7 +1034,11 @@ async fn cross_transport_webtransport_to_quic() {
 
     // Publisher (WebTransport)
     let pub_session = Arc::new(connect_webtransport_client(addr, cert_der.clone()).await);
-    publish_namespace(&pub_session, TrackNamespace::from(["daiki", "example"].as_slice())).await;
+    publish_namespace(
+        &pub_session,
+        TrackNamespace::from(["daiki", "example"].as_slice()),
+    )
+    .await;
 
     let _pub_keepalive = pub_session.clone();
     let pub_handle = tokio::spawn(async move {

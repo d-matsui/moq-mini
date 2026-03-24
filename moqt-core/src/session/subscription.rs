@@ -32,10 +32,14 @@ impl Subscription {
     }
 
     /// Wait for PUBLISH_DONE from the publisher.
-    pub async fn recv_publish_done(&mut self) -> Result<PublishDoneMessage> {
-        let msg = self.reader.read_message().await?;
+    /// Returns `Ok(None)` if the stream closed without PUBLISH_DONE (FIN).
+    pub async fn recv_publish_done(&mut self) -> Result<Option<PublishDoneMessage>> {
+        let msg = match self.reader.try_read_message().await? {
+            Some(msg) => msg,
+            None => return Ok(None),
+        };
         match msg {
-            RequestMessage::PublishDone(done) => Ok(done),
+            RequestMessage::PublishDone(done) => Ok(Some(done)),
             _ => Err(RequestError::UnexpectedMessage {
                 expected: "PUBLISH_DONE",
             }

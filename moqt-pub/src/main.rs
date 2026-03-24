@@ -1,22 +1,11 @@
 //! # moqt-pub: MOQT Publisher
 //!
 //! A client that connects to a relay server and publishes media data.
-//! Supports two modes:
-//!
-//! ## Demo mode (default)
-//! Sends dummy data (strings) as 5 groups x 3 objects each.
-//! Used for protocol behavior verification.
-//!
-//! ## Pipe mode (`--pipe`)
 //! Reads VP8 video in IVF container format from stdin
-//! and publishes it as MOQT objects. Used with ffmpeg, etc.
+//! and publishes it as MOQT objects.
 //!
 //! ```bash
-//! # Demo mode
-//! cargo run --bin moqt-pub
-//!
-//! # Pipe mode (convert camera video to VP8/IVF with ffmpeg and publish)
-//! ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin moqt-pub -- --pipe
+//! ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin moqt-pub
 //! ```
 //!
 //! ## IVF to MOQT mapping
@@ -25,7 +14,6 @@
 
 use std::io::Read;
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use moqt_core::client::{self, TlsConfig};
 use moqt_core::session::subgroup::SubgroupWriter;
@@ -36,6 +24,7 @@ use tracing::{debug, info, warn};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
@@ -48,7 +37,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Parse command-line arguments
     let args: Vec<String> = std::env::args().collect();
-    let pipe_mode = args.iter().any(|a| a == "--pipe");
     let relay_addr: SocketAddr = args
         .iter()
         .find(|a| !a.starts_with('-') && a.contains(':'))
@@ -93,33 +81,13 @@ async fn main() -> anyhow::Result<()> {
     request.accept(1).await?;
     info!("sent SUBSCRIBE_OK (alias=1)");
 
-    if pipe_mode {
-        // === Pipe mode: read IVF video from stdin and publish ===
-        let stream_count = send_from_stdin(&session, track_name).await?;
+    // === Read IVF video from stdin and publish ===
+    let stream_count = send_from_stdin(&session, track_name).await?;
 
-        // Send PUBLISH_DONE
-        request.send_publish_done(stream_count).await?;
-        // Wait for data to be flushed before closing the connection
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        info!(stream_count, "sent PUBLISH_DONE, exiting");
-    } else {
-        // === Demo mode: send dummy data ===
-        for group_id in 0u64..5 {
-            let mut group = session.open_subgroup(1, group_id, 0).await?;
-
-            for obj_id in 0u64..3 {
-                let payload = format!("g{group_id}o{obj_id}");
-                group.write_object(payload.as_bytes()).await?;
-            }
-
-            group.finish()?;
-            debug!(group_id, objects = 3, "sent group");
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-
-        request.send_publish_done(5).await?;
-        info!("sent PUBLISH_DONE, exiting");
-    }
+    // Send PUBLISH_DONE
+    request.send_publish_done(stream_count).await?;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    info!(stream_count, "sent PUBLISH_DONE, exiting");
 
     Ok(())
 }

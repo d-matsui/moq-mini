@@ -79,6 +79,15 @@ impl RequestStreamReader {
         parse_request_message(&bytes)
     }
 
+    /// Read one typed message, returning `None` on stream FIN.
+    pub async fn try_read_message(&mut self) -> Result<Option<RequestMessage>> {
+        let bytes = match crate::stream::try_read_message_frame(&mut self.stream).await? {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        Ok(Some(parse_request_message(&bytes)?))
+    }
+
     /// Read one message frame (Type + Length + Payload) as raw bytes.
     pub async fn read_message_bytes(&mut self) -> Result<Vec<u8>> {
         crate::stream::read_message_frame(&mut self.stream).await

@@ -11,7 +11,7 @@
 //!
 //! ## Usage
 //! ```bash
-//! ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin msf-pub -- --pipe
+//! ffmpeg -f avfoundation -i "0" -c:v libvpx -f ivf - | cargo run --bin msf-pub
 //! ```
 
 use std::io::Read;
@@ -28,6 +28,7 @@ use tracing::{debug, info, warn};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
