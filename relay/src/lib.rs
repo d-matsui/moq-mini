@@ -4,4 +4,7 @@
 //! When a subscriber requests a subscription to a namespace registered by a publisher,
 //! the relay forwards the SUBSCRIBE and relays data streams.
 
+mod control;
+mod data;
 pub mod relay;
+mod state;

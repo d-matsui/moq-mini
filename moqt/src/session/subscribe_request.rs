@@ -7,6 +7,7 @@
 use anyhow::Result;
 
 use crate::stream::request::RequestStreamWriter;
+use crate::wire::parameter::{MessageParameter, SubscriptionFilter};
 use crate::wire::publish_done::{PublishDoneMessage, STATUS_TRACK_ENDED};
 use crate::wire::reason_phrase::ReasonPhrase;
 use crate::wire::request_error::RequestErrorMessage;
@@ -23,6 +24,18 @@ pub struct SubscribeRequest {
 impl SubscribeRequest {
     pub(crate) fn new(message: SubscribeMessage, writer: RequestStreamWriter) -> Self {
         Self { message, writer }
+    }
+
+    /// Check whether the subscription contains a filter that this implementation
+    /// does not support. Currently only `NextGroupStart` is supported.
+    pub fn has_unsupported_filter(&self) -> bool {
+        self.message.parameters.iter().any(|p| {
+            matches!(
+                p,
+                MessageParameter::SubscriptionFilter(f)
+                if !matches!(f, SubscriptionFilter::NextGroupStart)
+            )
+        })
     }
 
     /// Accept the subscription by sending SUBSCRIBE_OK with the given track alias.
