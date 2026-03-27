@@ -39,6 +39,7 @@ use moqt::session::{MoqtSession, SessionEvent};
 
 use crate::control::handle_subscribe;
 use crate::data::handle_data_stream;
+use crate::fetch_handler::handle_fetch;
 use crate::state::RelayState;
 
 /// MOQT relay server. Holds a QUIC endpoint and accepts connections.
@@ -131,6 +132,13 @@ async fn handle_connection(incoming: quinn::Incoming, state: Arc<Mutex<RelayStat
                     info!(session_id, namespace = ?ns, "namespace registered");
                     if let Err(e) = request.accept().await {
                         error!(session_id, error = %e, "publish_namespace error");
+                    }
+                });
+            }
+            SessionEvent::Fetch(request) => {
+                tokio::spawn(async move {
+                    if let Err(e) = handle_fetch(session_id, request, state).await {
+                        error!(session_id, error = %e, "fetch error");
                     }
                 });
             }

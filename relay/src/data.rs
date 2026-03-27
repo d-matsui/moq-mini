@@ -1,85 +1,75 @@
 //! # data: Data plane stream handler
 //!
-//! Relays unidirectional data streams from publishers to subscribers.
+//! Receives unidirectional data streams from publishers and writes objects
+//! to the per-track cache (write-through model). Subscriber relay tasks
+//! read from the cache independently.
 
 use std::sync::Arc;
 
 use anyhow::Result;
 
 use tokio::sync::Mutex;
-use tracing::warn;
 
 use moqt::session::subgroup::SubgroupReader;
+use moqt::wire::object::resolve_object_id;
 
+use crate::cache::CachedObject;
 use crate::state::{RelayState, SessionId};
 
-/// Process a unidirectional data stream from a publisher and relay it to subscribers.
+/// Process a unidirectional data stream from a publisher.
 ///
-/// ## Relay flow
-/// 1. Identify the target subscription from the Track Alias in the SubgroupHeader
-/// 2. Open new uni streams to all subscribers
-/// 3. Forward the SubgroupHeader to subscribers
-/// 4. Read objects one by one and immediately forward them to subscribers
-///    (relay with low latency without buffering the entire stream)
-/// 5. Propagate stream termination (FIN) to subscribers
+/// Writes all objects to the per-track cache. Subscriber relay tasks
+/// (spawned by the control handler) read from the cache and forward
+/// to subscriber sessions.
+///
+/// ## Flow
+/// 1. Look up the TrackCache by (publisher_session, track_alias)
+/// 2. Begin a new group in the cache
+/// 3. Read objects one by one, resolve absolute Object IDs, write to cache
+/// 4. Mark group as complete when stream ends (FIN)
 pub(crate) async fn handle_data_stream(
     sender_session: SessionId,
     mut subgroup_reader: SubgroupReader,
     state: Arc<Mutex<RelayState>>,
 ) -> Result<()> {
     let track_alias = subgroup_reader.track_alias();
+    let group_id = subgroup_reader.group_id();
+    let header = subgroup_reader.header().clone();
 
-    // === Identify subscribers and open downstream streams ===
-    // Find matching subscriptions by Track Alias and sender session,
-    // then open uni streams to each subscriber
-    let sub_sessions = state
+    // Look up the TrackCache for this publisher's track
+    let cache = state
         .lock()
         .await
-        .find_subscriber_sessions(sender_session, track_alias);
+        .find_track_cache(sender_session, track_alias);
 
-    // If there are no subscribers, drain the stream
-    if sub_sessions.is_empty() {
+    let Some(cache) = cache else {
+        // No subscription for this track — drain the stream
         while let Ok(Some(_)) = subgroup_reader.read_object_raw().await {}
         return Ok(());
+    };
+
+    // Begin group in cache (writes SubgroupHeader)
+    cache.begin_group(group_id, header).await;
+
+    // Read objects and write to cache
+    let mut prev_object_id: Option<u64> = None;
+    while let Some((obj, payload, header_bytes)) = subgroup_reader.read_object_raw().await? {
+        let object_id = resolve_object_id(prev_object_id, obj.object_id_delta);
+        cache
+            .push_object(
+                group_id,
+                CachedObject {
+                    object_id,
+                    header_bytes,
+                    payload,
+                },
+            )
+            .await;
+        prev_object_id = Some(object_id);
     }
 
-    // === Open data streams to subscribers (writes SubgroupHeader) ===
-    let mut writers = Vec::new();
-    for session in &sub_sessions {
-        match session.open_data_stream(subgroup_reader.header()).await {
-            Ok(w) => writers.push(Arc::new(Mutex::new(w))),
-            Err(e) => warn!(error = %e, "failed to open data stream to subscriber"),
-        }
-    }
-    let mut active_writers = writers;
-
-    // === Relay objects incrementally ===
-    // Read objects one by one and immediately forward to all subscribers.
-    // No buffering, so memory usage stays low even for large streams.
-    // Subscribers that fail a write are removed from the active list.
-    while let Some((_obj, payload, obj_header_bytes)) = subgroup_reader.read_object_raw().await? {
-        let mut still_active = Vec::with_capacity(active_writers.len());
-        for writer in active_writers {
-            let mut w = writer.lock().await;
-            if w.write_raw(&obj_header_bytes).await.is_ok() && w.write_raw(&payload).await.is_ok() {
-                drop(w);
-                still_active.push(writer);
-            } else {
-                warn!("subscriber write error, removing from relay");
-            }
-        }
-        active_writers = still_active;
-    }
-
-    // === Propagate stream termination ===
-    // When the publisher's stream ends,
-    // send FIN to subscriber streams via finish()
-    for writer in &active_writers {
-        let mut w = writer.lock().await;
-        if let Err(e) = w.finish() {
-            warn!(error = %e, "subscriber finish error");
-        }
-    }
+    // Mark group as complete (publisher stream FIN)
+    cache.complete_group(group_id).await;
 
     Ok(())
 }

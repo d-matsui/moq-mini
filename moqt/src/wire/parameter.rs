@@ -22,8 +22,9 @@
 //! Parameter MUST close the session with PROTOCOL_VIOLATION."
 //!
 //! Encode supports the 3 enum variants only. SUBSCRIPTION_FILTER
-//! encode handles NextGroupStart only; other filter types are decoded
-//! but not encoded because this implementation does not originate them.
+//! encode handles NextGroupStart and LargestObject; other filter types
+//! are decoded but not encoded because this implementation does not
+//! originate them.
 
 use anyhow::{Result, bail, ensure};
 
@@ -108,9 +109,13 @@ pub fn encode_parameters(params: &[MessageParameter], buf: &mut Vec<u8>) -> Resu
                 match filter {
                     // 0x1: Filter Type only
                     SubscriptionFilter::NextGroupStart => encode_varint(0x1, &mut filter_payload),
+                    // 0x2: Filter Type only (same structure as NextGroupStart)
+                    SubscriptionFilter::LargestObject => encode_varint(0x2, &mut filter_payload),
                     // Other filter types are decoded but not encoded in this
-                    // minimal implementation (only NextGroupStart is used).
-                    _ => bail!("only NextGroupStart filter is supported for encoding"),
+                    // minimal implementation.
+                    _ => bail!(
+                        "only NextGroupStart and LargestObject filters are supported for encoding"
+                    ),
                 }
                 encode_varint(filter_payload.len() as u64, buf);
                 buf.extend_from_slice(&filter_payload);
@@ -384,6 +389,25 @@ mod tests {
         buf.extend_from_slice(&filter_payload);
         let mut slice = buf.as_slice();
         assert!(decode_parameters(&mut slice).is_err());
+    }
+
+    #[test]
+    fn subscription_filter_largest_object_roundtrip() {
+        roundtrip(&[MessageParameter::SubscriptionFilter(
+            SubscriptionFilter::LargestObject,
+        )]);
+    }
+
+    #[test]
+    fn largest_object_filter_with_other_params() {
+        roundtrip(&[
+            MessageParameter::LargestObject {
+                group: 5,
+                object: 3,
+            },
+            MessageParameter::Forward(1),
+            MessageParameter::SubscriptionFilter(SubscriptionFilter::LargestObject),
+        ]);
     }
 
     #[test]

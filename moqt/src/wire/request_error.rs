@@ -11,6 +11,10 @@
 pub const ERROR_NOT_SUPPORTED: u64 = 0x3;
 /// The track or namespace does not exist.
 pub const ERROR_DOES_NOT_EXIST: u64 = 0x10;
+/// The requested range is invalid or out of bounds.
+pub const ERROR_INVALID_RANGE: u64 = 0x11;
+/// The Joining Request ID in a FETCH does not reference a valid subscription.
+pub const ERROR_INVALID_JOINING_REQUEST_ID: u64 = 0x32;
 
 use anyhow::{Result, ensure};
 

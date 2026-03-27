@@ -27,14 +27,25 @@ impl SubscribeRequest {
     }
 
     /// Check whether the subscription contains a filter that this implementation
-    /// does not support. Currently only `NextGroupStart` is supported.
+    /// does not support. Currently only `NextGroupStart` and `LargestObject`
+    /// are supported.
     pub fn has_unsupported_filter(&self) -> bool {
         self.message.parameters.iter().any(|p| {
             matches!(
                 p,
                 MessageParameter::SubscriptionFilter(f)
-                if !matches!(f, SubscriptionFilter::NextGroupStart)
+                if !matches!(f, SubscriptionFilter::NextGroupStart | SubscriptionFilter::LargestObject)
             )
+        })
+    }
+
+    /// Extract the subscription filter from the parameters, if any.
+    /// Returns `None` if no SUBSCRIPTION_FILTER parameter is present
+    /// (equivalent to an unfiltered subscription).
+    pub fn subscription_filter(&self) -> Option<&SubscriptionFilter> {
+        self.message.parameters.iter().find_map(|p| match p {
+            MessageParameter::SubscriptionFilter(f) => Some(f),
+            _ => None,
         })
     }
 

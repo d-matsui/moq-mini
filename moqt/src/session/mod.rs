@@ -11,6 +11,7 @@
 //! - `publish_namespace_request`: Incoming PUBLISH_NAMESPACE request handler
 //! - `subscription`: Established subscription state
 
+pub mod fetch_request;
 pub mod publish_namespace_request;
 pub mod subgroup;
 pub mod subscribe_request;
@@ -20,6 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
 
+use crate::session::fetch_request::FetchRequest;
 use crate::session::publish_namespace_request::PublishNamespaceRequest;
 use crate::session::subgroup::{SubgroupReader, SubgroupWriter};
 use crate::session::subscribe_request::SubscribeRequest;
@@ -27,6 +29,8 @@ use crate::session::subscription::Subscription;
 use crate::stream::control::{ControlStreamReader, ControlStreamWriter};
 use crate::stream::data::{DataStreamReader, DataStreamWriter};
 use crate::stream::request::{RequestMessage, RequestStreamReader, RequestStreamWriter};
+use crate::wire::fetch::FetchMessage;
+use crate::wire::fetch_ok::FetchOkMessage;
 use crate::wire::parameter::MessageParameter;
 use crate::wire::publish_namespace::PublishNamespaceMessage;
 use crate::wire::setup::{SetupMessage, SetupOption};
@@ -92,6 +96,8 @@ impl RequestIdAllocator {
 pub enum SessionEvent {
     /// A SUBSCRIBE request was received on a bidi stream.
     Subscribe(SubscribeRequest),
+    /// A FETCH request was received on a bidi stream.
+    Fetch(FetchRequest),
     /// A PUBLISH_NAMESPACE request was received on a bidi stream.
     PublishNamespace(PublishNamespaceRequest),
     /// A data stream was received on a uni stream.
@@ -229,6 +235,44 @@ impl MoqtSession {
         }
     }
 
+    /// Send a FETCH request (Relative Joining).
+    /// Opens a bidi stream, sends FETCH, and waits for FETCH_OK.
+    /// Returns the FETCH_OK message on success.
+    pub async fn fetch(
+        &self,
+        request_id: u64,
+        joining_request_id: u64,
+        joining_start: u64,
+    ) -> Result<FetchOkMessage> {
+        let (send, recv) = self.session.open_bi().await?;
+        let mut writer = RequestStreamWriter::new(send);
+        let mut reader = RequestStreamReader::new(recv);
+
+        let msg = FetchMessage {
+            request_id,
+            required_request_id_delta: 0,
+            fetch_type: crate::wire::fetch::FETCH_TYPE_RELATIVE_JOINING,
+            joining_request_id,
+            joining_start,
+            parameters: vec![],
+        };
+        writer.write_fetch(&msg).await?;
+
+        let response = reader.read_message().await?;
+        match response {
+            RequestMessage::FetchOk(ok) => Ok(ok),
+            RequestMessage::RequestError(err) => Err(RequestError::Rejected {
+                status_code: err.error_code,
+                reason: String::from_utf8_lossy(&err.reason_phrase.value).into(),
+            }
+            .into()),
+            _ => Err(RequestError::UnexpectedMessage {
+                expected: "FETCH_OK or REQUEST_ERROR",
+            }
+            .into()),
+        }
+    }
+
     /// Wait for the next event on this session.
     /// Concurrently waits for a bidi request or a uni data stream.
     /// Only `accept_bi()` / `accept_uni()` are inside the `select!`,
@@ -244,13 +288,16 @@ impl MoqtSession {
                     RequestMessage::Subscribe(sub) => {
                         Ok(SessionEvent::Subscribe(SubscribeRequest::new(sub, writer)))
                     }
+                    RequestMessage::Fetch(fetch) => {
+                        Ok(SessionEvent::Fetch(FetchRequest::new(fetch, writer)))
+                    }
                     RequestMessage::PublishNamespace(pub_ns) => {
                         Ok(SessionEvent::PublishNamespace(
                             PublishNamespaceRequest::new(pub_ns, writer),
                         ))
                     }
                     _ => Err(RequestError::UnexpectedMessage {
-                        expected: "SUBSCRIBE or PUBLISH_NAMESPACE",
+                        expected: "SUBSCRIBE, FETCH, or PUBLISH_NAMESPACE",
                     }
                     .into()),
                 }
@@ -315,6 +362,18 @@ impl MoqtSession {
         let mut writer = DataStreamWriter::new(uni);
         writer.write_subgroup_header(header).await?;
         Ok(writer)
+    }
+
+    /// Accept a raw unidirectional receive stream.
+    /// Used for receiving FETCH_HEADER data streams.
+    pub async fn accept_uni_stream(&self) -> Result<web_transport_quinn::RecvStream> {
+        Ok(self.session.accept_uni().await?)
+    }
+
+    /// Open a raw unidirectional send stream.
+    /// Used for FETCH_HEADER data streams.
+    pub async fn open_uni_stream(&self) -> Result<web_transport_quinn::SendStream> {
+        Ok(self.session.open_uni().await?)
     }
 
     /// Close the session.

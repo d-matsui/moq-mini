@@ -11,6 +11,7 @@
 
 pub mod control;
 pub mod data;
+pub mod fetch_data;
 pub mod request;
 
 use anyhow::Result;

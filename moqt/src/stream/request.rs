@@ -12,6 +12,8 @@
 use anyhow::{Result, bail};
 use web_transport_quinn::{RecvStream, SendStream};
 
+use crate::wire::fetch::FetchMessage;
+use crate::wire::fetch_ok::FetchOkMessage;
 use crate::wire::publish_done::PublishDoneMessage;
 use crate::wire::publish_namespace::PublishNamespaceMessage;
 use crate::wire::request_error::RequestErrorMessage;
@@ -20,8 +22,8 @@ use crate::wire::subscribe::SubscribeMessage;
 use crate::wire::subscribe_ok::SubscribeOkMessage;
 use crate::wire::varint::decode_varint;
 use crate::wire::{
-    MSG_PUBLISH_DONE, MSG_PUBLISH_NAMESPACE, MSG_REQUEST_ERROR, MSG_REQUEST_OK, MSG_SUBSCRIBE,
-    MSG_SUBSCRIBE_OK,
+    MSG_FETCH, MSG_FETCH_OK, MSG_PUBLISH_DONE, MSG_PUBLISH_NAMESPACE, MSG_REQUEST_ERROR,
+    MSG_REQUEST_OK, MSG_SUBSCRIBE, MSG_SUBSCRIBE_OK,
 };
 
 /// A typed message read from or written to a request stream.
@@ -29,6 +31,8 @@ pub enum RequestMessage {
     PublishNamespace(PublishNamespaceMessage),
     Subscribe(SubscribeMessage),
     SubscribeOk(SubscribeOkMessage),
+    Fetch(FetchMessage),
+    FetchOk(FetchOkMessage),
     RequestOk(RequestOkMessage),
     RequestError(RequestErrorMessage),
     PublishDone(PublishDoneMessage),
@@ -59,6 +63,8 @@ pub fn parse_request_message(bytes: &[u8]) -> Result<RequestMessage> {
         MSG_PUBLISH_DONE => Ok(RequestMessage::PublishDone(PublishDoneMessage::decode(
             &mut slice,
         )?)),
+        MSG_FETCH => Ok(RequestMessage::Fetch(FetchMessage::decode(&mut slice)?)),
+        MSG_FETCH_OK => Ok(RequestMessage::FetchOk(FetchOkMessage::decode(&mut slice)?)),
         _ => bail!("unknown request message type: 0x{msg_type:X}"),
     }
 }
@@ -142,6 +148,20 @@ impl RequestStreamWriter {
     pub async fn write_publish_done(&mut self, msg: &PublishDoneMessage) -> Result<()> {
         let mut buf = Vec::new();
         msg.encode(&mut buf);
+        self.stream.write_all(&buf).await?;
+        Ok(())
+    }
+
+    pub async fn write_fetch(&mut self, msg: &FetchMessage) -> Result<()> {
+        let mut buf = Vec::new();
+        msg.encode(&mut buf)?;
+        self.stream.write_all(&buf).await?;
+        Ok(())
+    }
+
+    pub async fn write_fetch_ok(&mut self, msg: &FetchOkMessage) -> Result<()> {
+        let mut buf = Vec::new();
+        msg.encode(&mut buf)?;
         self.stream.write_all(&buf).await?;
         Ok(())
     }
@@ -258,6 +278,39 @@ mod tests {
             msg.encode(buf);
         });
         assert!(matches!(msg, RequestMessage::PublishDone(_)));
+    }
+
+    #[test]
+    fn parse_fetch() {
+        use crate::wire::fetch::{FETCH_TYPE_RELATIVE_JOINING, FetchMessage};
+        let msg = roundtrip_parse(|buf| {
+            let msg = FetchMessage {
+                request_id: 2,
+                required_request_id_delta: 0,
+                fetch_type: FETCH_TYPE_RELATIVE_JOINING,
+                joining_request_id: 0,
+                joining_start: 3,
+                parameters: vec![],
+            };
+            msg.encode(buf).unwrap();
+        });
+        assert!(matches!(msg, RequestMessage::Fetch(_)));
+    }
+
+    #[test]
+    fn parse_fetch_ok() {
+        use crate::wire::fetch_ok::FetchOkMessage;
+        let msg = roundtrip_parse(|buf| {
+            let msg = FetchOkMessage {
+                end_of_track: false,
+                end_group: 5,
+                end_object: 11,
+                parameters: vec![],
+                track_properties_raw: vec![],
+            };
+            msg.encode(buf).unwrap();
+        });
+        assert!(matches!(msg, RequestMessage::FetchOk(_)));
     }
 
     #[test]

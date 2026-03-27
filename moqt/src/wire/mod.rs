@@ -37,6 +37,8 @@ pub mod track_namespace;
 pub mod varint;
 
 // Control messages
+pub mod fetch;
+pub mod fetch_ok;
 pub mod parameter;
 pub mod publish_done;
 pub mod publish_namespace;
@@ -47,6 +49,7 @@ pub mod subscribe;
 pub mod subscribe_ok;
 
 // Data stream headers
+pub mod fetch_header;
 pub mod object;
 pub mod subgroup_header;
 
@@ -61,6 +64,8 @@ pub const MSG_REQUEST_ERROR: u64 = 0x05;
 pub const MSG_PUBLISH_NAMESPACE: u64 = 0x06;
 pub const MSG_REQUEST_OK: u64 = 0x07;
 pub const MSG_PUBLISH_DONE: u64 = 0x0B;
+pub const MSG_FETCH: u64 = 0x16;
+pub const MSG_FETCH_OK: u64 = 0x18;
 /// SETUP message has a special Type ID (0x2F00).
 /// Also used to identify the control stream.
 pub const MSG_SETUP: u64 = 0x2F00;

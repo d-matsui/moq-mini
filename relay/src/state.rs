@@ -8,10 +8,12 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use moqt::session::subscribe_request::SubscribeRequest;
 use moqt::session::MoqtSession;
+use moqt::session::subscribe_request::SubscribeRequest;
 use moqt::wire::subscribe_ok::SubscribeOkMessage;
 use moqt::wire::track_namespace::TrackNamespace;
+
+use crate::cache::TrackCache;
 
 /// Unique identifier for a session. Assigned sequentially per connection.
 pub(crate) type SessionId = u64;
@@ -34,6 +36,8 @@ pub(crate) struct Subscription {
     pub subscribe_ok: SubscribeOkMessage,
     /// List of subscribers receiving data for this track
     pub subscribers: Vec<SubscriberEntry>,
+    /// Per-track object cache (shared across all subscribers of this track).
+    pub cache: Arc<TrackCache>,
 }
 
 /// A subscriber within a subscription.
@@ -41,6 +45,12 @@ pub(crate) struct SubscriberEntry {
     pub session_id: SessionId,
     /// Request handle for sending PUBLISH_DONE
     pub request: Arc<Mutex<SubscribeRequest>>,
+    /// The subscriber's original SUBSCRIBE Request ID.
+    /// Used to match Joining FETCH requests back to this subscription.
+    pub subscriber_request_id: u64,
+    /// The Joining Location: LARGEST_OBJECT from the SUBSCRIBE_OK sent to this subscriber.
+    /// Used to compute the FETCH range for Joining Fetch.
+    pub joining_location: Option<(u64, u64)>,
 }
 
 /// Shared relay state. Manages sessions, namespace registrations, and subscriptions.
@@ -97,7 +107,10 @@ impl RelayState {
     /// Find the publisher session for a namespace (prefix match).
     /// Tries progressively shorter prefixes of the given namespace
     /// against the HashMap until a match is found.
-    pub fn find_publisher(&self, namespace: &TrackNamespace) -> Option<(SessionId, Arc<MoqtSession>)> {
+    pub fn find_publisher(
+        &self,
+        namespace: &TrackNamespace,
+    ) -> Option<(SessionId, Arc<MoqtSession>)> {
         let mut prefix = namespace.clone();
         loop {
             if let Some(&pub_id) = self.namespace_to_publisher.get(&prefix) {
@@ -119,6 +132,7 @@ impl RelayState {
         publisher_track_alias: u64,
         subscribe_ok: SubscribeOkMessage,
         subscriber: SubscriberEntry,
+        cache: Arc<TrackCache>,
     ) {
         let sub = self
             .subscriptions
@@ -128,25 +142,24 @@ impl RelayState {
                 publisher_track_alias,
                 subscribe_ok,
                 subscribers: Vec::new(),
+                cache,
             });
         sub.subscribers.push(subscriber);
     }
 
-    /// Find subscriber sessions for a given publisher's data stream.
-    pub fn find_subscriber_sessions(
+    /// Find the TrackCache for a given publisher's data stream.
+    pub fn find_track_cache(
         &self,
         publisher_session: SessionId,
         track_alias: u64,
-    ) -> Vec<Arc<MoqtSession>> {
+    ) -> Option<Arc<TrackCache>> {
         self.subscriptions
             .values()
-            .filter(|sub| {
+            .find(|sub| {
                 sub.publisher_session == publisher_session
                     && sub.publisher_track_alias == track_alias
             })
-            .flat_map(|sub| &sub.subscribers)
-            .filter_map(|s| self.sessions.get(&s.session_id).cloned())
-            .collect()
+            .map(|sub| sub.cache.clone())
     }
 
     /// Find an existing subscription for the same track (for aggregation).
@@ -157,8 +170,30 @@ impl RelayState {
         self.subscriptions.get_mut(track)
     }
 
+    /// Find a subscription and subscriber entry by the subscriber's session ID and
+    /// SUBSCRIBE request ID. Used for Joining FETCH to look up the associated subscription.
+    /// Returns the cache and joining_location for the matching subscriber.
+    #[allow(clippy::type_complexity)]
+    pub fn find_subscription_by_subscriber_request(
+        &self,
+        session_id: SessionId,
+        request_id: u64,
+    ) -> Option<(Arc<TrackCache>, Option<(u64, u64)>)> {
+        for sub in self.subscriptions.values() {
+            for entry in &sub.subscribers {
+                if entry.session_id == session_id && entry.subscriber_request_id == request_id {
+                    return Some((sub.cache.clone(), entry.joining_location));
+                }
+            }
+        }
+        None
+    }
+
     /// Find subscriber request handles for a given track (for PUBLISH_DONE forwarding).
-    pub fn find_subscriber_requests(&self, track: &FullTrackName) -> Vec<Arc<Mutex<SubscribeRequest>>> {
+    pub fn find_subscriber_requests(
+        &self,
+        track: &FullTrackName,
+    ) -> Vec<Arc<Mutex<SubscribeRequest>>> {
         self.subscriptions
             .get(track)
             .map(|sub| sub.subscribers.iter().map(|s| s.request.clone()).collect())
