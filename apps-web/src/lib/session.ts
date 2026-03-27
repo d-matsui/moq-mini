@@ -32,6 +32,7 @@ import {
   MSG_PUBLISH_DONE,
   MSG_PUBLISH_NAMESPACE,
   MSG_SUBSCRIBE_NAMESPACE,
+  MSG_FETCH_OK,
 } from "./wire/message.js";
 import {
   encodeSubgroupHeader,
@@ -42,11 +43,13 @@ import { encodeObjectHeader, decodeObjectHeader } from "./wire/object.js";
 import { trackNamespaceFrom, type TrackNamespace } from "./wire/track-namespace.js";
 import {
   subscriptionFilterNextGroupStart,
+  extractLargestObject,
   type MessageParameter,
 } from "./wire/parameter.js";
+import { encodeFetch, FETCH_TYPE_RELATIVE_JOINING, type FetchMessage } from "./wire/fetch.js";
+import { decodeFetchOk, type FetchOkMessage } from "./wire/fetch-ok.js";
 import { encodeVarint, decodeVarint } from "./wire/varint.js";
-import type { TrackNamespace } from "./wire/track-namespace.js";
-import { decodeTrackNamespace, trackNamespaceFrom } from "./wire/track-namespace.js";
+import { decodeTrackNamespace } from "./wire/track-namespace.js";
 import { encodeNamespace } from "./wire/namespace.js";
 
 /** Format a TrackNamespace as a human-readable string, e.g. ["anon", "example"]. */
@@ -189,10 +192,16 @@ export class SubscribeRequest {
 /** An established subscription (subscriber side). */
 export class Subscription {
   readonly trackAlias: number;
+  /** The full SUBSCRIBE_OK message (for extracting LARGEST_OBJECT etc.). */
+  readonly subscribeOk: SubscribeOkMessage;
+  /** The SUBSCRIBE request ID used for this subscription. */
+  readonly requestId: number;
   private recvReader: StreamReader;
 
-  constructor(trackAlias: number, recvReader: StreamReader) {
-    this.trackAlias = trackAlias;
+  constructor(requestId: number, ok: SubscribeOkMessage, recvReader: StreamReader) {
+    this.requestId = requestId;
+    this.trackAlias = ok.trackAlias;
+    this.subscribeOk = ok;
     this.recvReader = recvReader;
   }
 
@@ -200,6 +209,82 @@ export class Subscription {
   async recvPublishDone(): Promise<PublishDoneMessage> {
     const frame = await this.recvReader.readMessageFrame();
     return decodePublishDone(frame);
+  }
+}
+
+/** A fetched object from a FETCH_HEADER stream. */
+export interface FetchedObject {
+  groupId: number;
+  objectId: number;
+  subgroupId: number;
+  payload: Uint8Array;
+}
+
+/** Reader for a FETCH_HEADER unidirectional stream. */
+export class FetchStreamReader {
+  private reader: StreamReader;
+  readonly requestId: number;
+  private prevGroup = 0;
+  private prevSubgroup = 0;
+  private prevObject = 0;
+  private prevPriority = 0;
+
+  constructor(reader: StreamReader, requestId: number) {
+    this.reader = reader;
+    this.requestId = requestId;
+  }
+
+  /** Read the next fetched object. Returns null on stream end. */
+  async readObject(): Promise<FetchedObject | null> {
+    const result = await this.reader.tryReadVarint();
+    if (result === null) return null;
+    const [flags] = result;
+
+    const hasGroupId = (flags & 0x08) !== 0;
+    const hasObjectId = (flags & 0x04) !== 0;
+    const hasPriority = (flags & 0x10) !== 0;
+    const subgroupMode = flags & 0x03;
+
+    const groupId = hasGroupId
+      ? (await this.reader.readVarint())[0]
+      : this.prevGroup;
+
+    let subgroupId: number;
+    if (subgroupMode === 0x03) {
+      subgroupId = (await this.reader.readVarint())[0];
+    } else if (subgroupMode === 0x00) {
+      subgroupId = 0;
+    } else if (subgroupMode === 0x01) {
+      subgroupId = this.prevSubgroup;
+    } else {
+      subgroupId = this.prevSubgroup + 1;
+    }
+
+    const objectId = hasObjectId
+      ? (await this.reader.readVarint())[0]
+      : this.prevObject + 1;
+
+    if (hasPriority) {
+      const buf = await this.reader.readExact(1);
+      this.prevPriority = buf[0];
+    }
+
+    // Properties (flag 0x20) - skip if present
+    if ((flags & 0x20) !== 0) {
+      const [propsLen] = await this.reader.readVarint();
+      if (propsLen > 0) await this.reader.readExact(propsLen);
+    }
+
+    const [payloadLen] = await this.reader.readVarint();
+    const payload = payloadLen > 0
+      ? await this.reader.readExact(payloadLen)
+      : new Uint8Array(0);
+
+    this.prevGroup = groupId;
+    this.prevSubgroup = subgroupId;
+    this.prevObject = objectId;
+
+    return { groupId, objectId, subgroupId, payload };
   }
 }
 
@@ -331,7 +416,60 @@ export class MoqtSession {
       throw new Error(`unexpected response: 0x${msgType.toString(16)}`);
     }
     const ok = decodeSubscribeOk(frame);
-    return new Subscription(ok.trackAlias, reader);
+    return new Subscription(msg.requestId, ok, reader);
+  }
+
+  /** Send a Relative Joining FETCH and wait for FETCH_OK. */
+  async fetch(
+    joiningRequestId: number,
+    joiningStart: number,
+  ): Promise<FetchOkMessage> {
+    const bidi = await this.transport.createBidirectionalStream();
+    const writer = bidi.writable.getWriter();
+    const reader = new StreamReader(bidi.readable);
+
+    const msg: FetchMessage = {
+      requestId: this.allocateRequestId(),
+      requiredRequestIdDelta: 0,
+      fetchType: FETCH_TYPE_RELATIVE_JOINING,
+      joiningRequestId,
+      joiningStart,
+      parameters: [],
+    };
+    console.log(`[fetch] sending FETCH: reqId=${msg.requestId} joiningReqId=${joiningRequestId} joiningStart=${joiningStart}`);
+    await writer.write(encodeFetch(msg));
+
+    const frame = await reader.readMessageFrame();
+    const { msgType } = decodeMessage(frame, 0);
+    if (msgType === MSG_REQUEST_ERROR) {
+      throw new Error("FETCH rejected");
+    }
+    if (msgType !== MSG_FETCH_OK) {
+      throw new Error(`unexpected FETCH response: 0x${msgType.toString(16)}`);
+    }
+    const ok = decodeFetchOk(frame);
+    console.log(`[fetch] FETCH_OK: endGroup=${ok.endGroup} endObject=${ok.endObject} endOfTrack=${ok.endOfTrack}`);
+    return ok;
+  }
+
+  /** Accept a FETCH_HEADER unidirectional stream and return a reader.
+   *  Call this after fetch() to read the fetched objects.
+   */
+  async acceptFetchStream(): Promise<FetchStreamReader> {
+    const uniReader = this.transport.incomingUnidirectionalStreams.getReader();
+    const { value: recvStream } = await uniReader.read();
+    uniReader.releaseLock();
+    if (!recvStream) throw new Error("no incoming FETCH stream");
+
+    const reader = new StreamReader(recvStream);
+    // Read FETCH_HEADER: Type (0x05) + Request ID
+    const [headerType] = await reader.readVarint();
+    if (headerType !== 0x05) {
+      throw new Error(`expected FETCH_HEADER (0x05), got 0x${headerType.toString(16)}`);
+    }
+    const [requestId] = await reader.readVarint();
+    console.log(`[fetch] FETCH_HEADER stream: requestId=${requestId}`);
+    return new FetchStreamReader(reader, requestId);
   }
 
   /** Wait for the next incoming event (SUBSCRIBE or data stream). */

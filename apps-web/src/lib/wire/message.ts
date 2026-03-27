@@ -13,6 +13,8 @@ export const MSG_REQUEST_OK = 0x07;
 export const MSG_NAMESPACE = 0x08;
 export const MSG_PUBLISH_DONE = 0x0b;
 export const MSG_SUBSCRIBE_NAMESPACE = 0x11;
+export const MSG_FETCH = 0x16;
+export const MSG_FETCH_OK = 0x18;
 export const MSG_SETUP = 0x2f00;
 
 /** Encode a control message: Type (varint) + Length (u16 BE) + Payload. */
