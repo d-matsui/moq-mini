@@ -13,6 +13,7 @@
 
 pub mod fetch_request;
 pub mod publish_namespace_request;
+pub mod published_namespace;
 pub mod subgroup;
 pub mod subscribe_request;
 pub mod subscription;
@@ -25,6 +26,7 @@ use crate::session::fetch_request::FetchRequest;
 use crate::session::publish_namespace_request::PublishNamespaceRequest;
 use crate::session::subgroup::{SubgroupReader, SubgroupWriter};
 use crate::session::subscribe_request::SubscribeRequest;
+use crate::session::published_namespace::PublishedNamespace;
 use crate::session::subscription::Subscription;
 use crate::stream::control::{ControlStreamReader, ControlStreamWriter};
 use crate::stream::data::{DataStreamReader, DataStreamWriter};
@@ -171,7 +173,10 @@ impl MoqtSession {
     /// Register a namespace with the peer.
     /// Opens a bidi stream, sends PUBLISH_NAMESPACE, and waits for REQUEST_OK.
     /// Returns an error if the peer responds with REQUEST_ERROR.
-    pub async fn publish_namespace(&self, namespace: TrackNamespace) -> Result<()> {
+    pub async fn publish_namespace(
+        &self,
+        namespace: TrackNamespace,
+    ) -> Result<PublishedNamespace> {
         let (send, recv) = self.session.open_bi().await?;
         let mut writer = RequestStreamWriter::new(send);
         let mut reader = RequestStreamReader::new(recv);
@@ -185,7 +190,7 @@ impl MoqtSession {
 
         let response = reader.read_message().await?;
         match response {
-            RequestMessage::RequestOk(_) => Ok(()),
+            RequestMessage::RequestOk(_) => Ok(PublishedNamespace::new(writer, reader)),
             RequestMessage::RequestError(err) => Err(RequestError::Rejected {
                 status_code: err.error_code,
                 reason: String::from_utf8_lossy(&err.reason_phrase.value).into(),

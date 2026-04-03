@@ -296,7 +296,11 @@ export type SessionEvent =
 export class MoqtSession {
   private transport: WebTransport;
   private nextRequestId = 0;
-  private publishedNamespaces: TrackNamespace[] = [];
+  private publishedNamespaces: {
+    ns: TrackNamespace;
+    writer: WritableStreamDefaultWriter<Uint8Array>;
+    reader: StreamReader;
+  }[] = [];
 
   private constructor(transport: WebTransport) {
     this.transport = transport;
@@ -380,7 +384,11 @@ export class MoqtSession {
     if (msgType !== MSG_REQUEST_OK) {
       throw new Error(`unexpected response: 0x${msgType.toString(16)}`);
     }
-    this.publishedNamespaces.push(trackNamespaceFrom(namespace));
+    this.publishedNamespaces.push({
+      ns: trackNamespaceFrom(namespace),
+      writer,
+      reader,
+    });
   }
 
   /** Subscribe to a track. */

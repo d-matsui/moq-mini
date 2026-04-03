@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
 
     let ns_fields: Vec<&str> = namespace_raw.split('/').filter(|s| !s.is_empty()).collect();
     let ns = TrackNamespace::from(ns_fields.as_slice());
-    session.publish_namespace(ns.clone()).await?;
+    let _pub_ns = session.publish_namespace(ns.clone()).await?;
     info!("PUBLISH_NAMESPACE registered");
 
     debug!("waiting for SUBSCRIBE");
