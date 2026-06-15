@@ -1,5 +1,5 @@
-CLAUDE.md
+/target
 .claude
-/target/
-/certs/
-.reports/
+
+# Symlink to Luke's moq.dev repo for reference (not committed)
+/docs/reference/moq

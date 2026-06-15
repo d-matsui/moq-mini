@@ -1,28 +1,6 @@
-[workspace]
-members = [
-    "moqt",
-    "relay",
-    "msf",
-    "apps-cli/lib",
-    "apps-cli/ivf-publisher",
-    "apps-cli/ivf-subscriber",
-    "apps-cli/msf-publisher",
-    "apps-cli/msf-subscriber",
-]
-resolver = "2"
-
-[workspace.package]
+[package]
+name = "moq-mini"
+version = "0.1.0"
 edition = "2024"
 
-[workspace.dependencies]
-quinn = "0.11"
-rustls = { version = "0.23", features = ["ring"] }
-rustls-pki-types = "1"
-rcgen = "0.13"
-tokio = { version = "1", features = ["full"] }
-anyhow = "1"
-thiserror = "2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-url = "2"
-web-transport-quinn = { version = "0.11", default-features = false, features = ["ring"] }
+[dependencies]
